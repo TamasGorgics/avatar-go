@@ -1,12 +1,11 @@
 package main
 
 import (
-	"bufio"
-	"bytes"
+	"context"
 	_ "embed"
 	"encoding/json"
+	"errors"
 	"html/template"
-	"io"
 	"log"
 	"net"
 	"net/http"
@@ -15,6 +14,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/openai/openai-go/v3"
+	"github.com/openai/openai-go/v3/option"
 )
 
 //go:embed about.md
@@ -120,9 +122,23 @@ type msg struct {
 
 type server struct {
 	cfg    config
+	ai     openai.Client
 	lim    *limiter
 	system string
 	page   *template.Template
+}
+
+func logUpstreamError(err error) {
+	var apiErr *openai.Error
+	if errors.As(err, &apiErr) {
+		if apiErr.Message != "" {
+			log.Printf("upstream status %d: %s", apiErr.StatusCode, apiErr.Message)
+		} else {
+			log.Printf("upstream status %d", apiErr.StatusCode)
+		}
+		return
+	}
+	log.Printf("upstream error: %v", err)
 }
 
 func (s *server) handleChat(w http.ResponseWriter, r *http.Request) {
@@ -145,71 +161,54 @@ func (s *server) handleChat(w http.ResponseWriter, r *http.Request) {
 	if len(in.History) > 6 {
 		in.History = in.History[len(in.History)-6:]
 	}
-	msgs := []msg{{Role: "system", Content: s.system}}
+	msgs := []openai.ChatCompletionMessageParamUnion{openai.SystemMessage(s.system)}
 	for _, m := range in.History {
-		if m.Role != "user" && m.Role != "assistant" {
-			continue
-		}
 		if len(m.Content) > 500 {
 			m.Content = m.Content[:500]
 		}
-		msgs = append(msgs, m)
+		switch m.Role {
+		case "user":
+			msgs = append(msgs, openai.UserMessage(m.Content))
+		case "assistant":
+			msgs = append(msgs, openai.AssistantMessage(m.Content))
+		}
 	}
-
-	body, _ := json.Marshal(map[string]any{
-		"model":                 s.cfg.model,
-		"messages":              msgs,
-		"stream":                true,
-		"max_completion_tokens": 400, // newer OpenAI models reject max_tokens
-	})
-	req, _ := http.NewRequestWithContext(r.Context(), "POST", s.cfg.baseURL+"/chat/completions", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+s.cfg.apiKey)
 
 	// Overall cap on the request, including the streamed body.
-	resp, err := (&http.Client{Timeout: 60 * time.Second}).Do(req)
-	if err != nil || resp.StatusCode != http.StatusOK {
-		if err == nil {
-			b, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-			resp.Body.Close()
-			log.Printf("upstream status %d: %s", resp.StatusCode, b)
-		} else {
-			log.Printf("upstream error: %v", err)
-		}
-		http.Error(w, "The twin is unavailable right now.", http.StatusBadGateway)
-		return
-	}
-	defer resp.Body.Close()
+	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+	defer cancel()
 
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("X-Accel-Buffering", "no")
+	stream := s.ai.Chat.Completions.NewStreaming(ctx, openai.ChatCompletionNewParams{
+		Model:               s.cfg.model,
+		Messages:            msgs,
+		MaxCompletionTokens: openai.Int(400), // newer OpenAI models reject max_tokens
+	})
+	defer func() { _ = stream.Close() }()
+
 	fl, _ := w.(http.Flusher)
-
-	// Upstream speaks SSE ("data: {...}"); forward just the text deltas.
-	sc := bufio.NewScanner(resp.Body)
-	sc.Buffer(make([]byte, 64<<10), 1<<20)
-	for sc.Scan() {
-		line := sc.Text()
-		if !strings.HasPrefix(line, "data: ") {
+	wrote := false
+	for stream.Next() {
+		chunk := stream.Current()
+		if len(chunk.Choices) == 0 || chunk.Choices[0].Delta.Content == "" {
 			continue
 		}
-		data := strings.TrimPrefix(line, "data: ")
-		if data == "[DONE]" {
-			break
+		if !wrote {
+			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+			w.Header().Set("Cache-Control", "no-cache")
+			w.Header().Set("X-Accel-Buffering", "no")
+			wrote = true
 		}
-		var chunk struct {
-			Choices []struct {
-				Delta struct {
-					Content string `json:"content"`
-				} `json:"delta"`
-			} `json:"choices"`
+		if _, err := w.Write([]byte(chunk.Choices[0].Delta.Content)); err != nil {
+			return
 		}
-		if json.Unmarshal([]byte(data), &chunk) == nil && len(chunk.Choices) > 0 {
-			w.Write([]byte(chunk.Choices[0].Delta.Content))
-			if fl != nil {
-				fl.Flush()
-			}
+		if fl != nil {
+			fl.Flush()
+		}
+	}
+	if err := stream.Err(); err != nil {
+		logUpstreamError(err)
+		if !wrote {
+			http.Error(w, "The twin is unavailable right now.", http.StatusBadGateway)
 		}
 	}
 }
@@ -253,8 +252,13 @@ f.onsubmit=async e=>{
 
 func main() {
 	cfg := loadConfig()
+	ai := openai.NewClient(
+		option.WithAPIKey(cfg.apiKey),
+		option.WithBaseURL(cfg.baseURL),
+	)
 	s := &server{
 		cfg:    cfg,
+		ai:     ai,
 		lim:    newLimiter(),
 		system: strings.Replace(systemTmpl, "%s", about, 1),
 		page:   template.Must(template.New("p").Parse(pageHTML)),

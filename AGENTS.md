@@ -1,14 +1,17 @@
 # AGENTS.md
 
 Single-file Go service (`main.go`, package `main`) that serves a chat page and proxies
-streaming answers from an OpenAI-compatible API. No dependencies, tests, CI, or Makefile.
+streaming answers from an OpenAI-compatible API via `github.com/openai/openai-go/v3`.
+No tests, CI, or Makefile.
 
 ## Commands
 
 - Run: `go run .` (listens on `:8080` by default)
 - Build: `go build -o avatar .`
-- Verify: `go vet ./... && go build ./...` — there is no test suite; exercise `/chat` with curl.
-- Requires Go 1.27.1 per `go.mod` (method-pattern routing like `GET /{$}` needs Go 1.22+).
+- Verify: `go vet ./... && go build -o /dev/null .` — there is no test suite; exercise `/chat`
+  with curl. Plain `go build ./...` drops an untracked `avatar-go` binary in the repo root.
+- Requires Go 1.27.1 per `go.mod`; SDK v3 itself needs Go 1.26+.
+- SDK import path is versioned: `github.com/openai/openai-go/v3` (not `.../openai-go`).
 
 ## The profile is embedded at compile time
 
@@ -31,14 +34,24 @@ All config is environment variables (read once at startup):
 | `PER_IP_HOURLY` | `20` | Requests per client IP per rolling hour |
 | `TRUST_PROXY` | unset | Set to `1` only behind a trusted proxy (e.g. Caddy); enables `X-Forwarded-For` |
 
-Missing API key is not validated at startup; requests fail with `502` and the upstream
-error is logged.
+The client is built with explicit `option.WithAPIKey`/`option.WithBaseURL`, so the SDK's
+own defaults do not apply: `OPENAI_BASE_URL` is ignored — use `LLM_BASE_URL`. Missing API
+key is not validated at startup; requests fail with `502` and the upstream error is logged.
+
+## SDK notes
+
+- Uses Chat Completions (`client.Chat.Completions.NewStreaming`), not the Responses API, to
+  keep arbitrary OpenAI-compatible `LLM_BASE_URL` endpoints working. Do not switch without
+  intentionally dropping that compatibility.
+- The SDK handles upstream SSE framing and decoding; `/chat` only forwards `delta.content`.
+- SDK retries are left at the default (2); the 60s `context` deadline covers retries and
+  the full stream.
 
 ## Behavior worth preserving
 
 - Routes: `GET /` (embedded HTML template) and `POST /chat` with body
   `{"history":[{"role":"user"|"assistant","content":"..."}]}`. Response is a plain-text
-  stream of assistant deltas, not SSE (upstream SSE is parsed and stripped).
+  stream of assistant deltas, not SSE.
 - `/chat` sanitizes input deliberately: last 6 turns only, non-user/assistant roles
   dropped (clients cannot inject `system`), each message truncated to 500 chars, body
   capped at 16 KB. Keep these guards when refactoring.
