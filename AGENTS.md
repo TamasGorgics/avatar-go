@@ -5,7 +5,8 @@ OpenAI-compatible API via `github.com/openai/openai-go/v3`. No tests, CI, or Mak
 
 ## Layout
 
-- `main.go` — wiring only; owns the `//go:embed about.md` profile.
+- `main.go` — wiring, HTTP server lifecycle (graceful shutdown), and the `//go:embed
+  about.md` profile.
 - `internal/config` — env loading (`Load`).
 - `internal/ratelimit` — in-memory per-IP/hour and global daily limiter.
 - `internal/twin` — system prompt, SDK client, and `Chatter`/`Stream` interfaces.
@@ -73,6 +74,8 @@ integer caps fall back to their defaults.
 - Rate limits are checked before JSON parsing, so malformed requests still consume quota.
 - Limiter state is in-memory: the daily counter resets on restart and is per-process, so it
   is a spend guard, not a hard quota across replicas/redeploys.
+- `main.go` handles SIGINT/SIGTERM with `http.Server.Shutdown` and a 10s drain, so in-flight
+  streams can finish. Do not replace it with a bare `http.ListenAndServe`/`log.Fatal`.
 - `max_completion_tokens` is intentional (newer OpenAI models reject `max_tokens`).
 - Page HTML/JS is in `internal/web/page.go`; the system prompt is in
   `internal/twin/prompt.go`. There are no template/static files to edit.
