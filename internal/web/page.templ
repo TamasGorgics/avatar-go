@@ -1,0 +1,130 @@
+package web
+
+templ Page() {
+	<!DOCTYPE html>
+	<html lang="en">
+		<head>
+			<meta charset="utf-8"/>
+			<meta name="viewport" content="width=device-width, initial-scale=1"/>
+			<meta name="description" content="Ask questions about me and get answers from my CV and notes."/>
+			<meta name="theme-color" content="#fbfaf7"/>
+			<link rel="icon" type="image/svg+xml" href="/assets/favicon.svg"/>
+			<title>Ask my digital twin</title>
+			<link rel="stylesheet" href="/assets/app.css"/>
+		</head>
+		<body class="h-dvh overflow-hidden bg-snow font-sans text-fjord-900 antialiased">
+			<a href="#chat-input" class="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded-full focus:bg-fjord-700 focus:px-4 focus:py-2 focus:text-sm focus:font-semibold focus:text-snow">Skip to the question box</a>
+			<div class="mx-auto flex h-full min-h-0 w-full max-w-3xl flex-col px-4 sm:px-6">
+				@siteHeader()
+				<main class="flex min-h-0 flex-1 flex-col gap-4 pb-4">
+					@chatPanel()
+					@chatComposer()
+				</main>
+				@siteFooter()
+			</div>
+			@messageTemplates()
+			<script src="/assets/app.js" defer></script>
+		</body>
+	</html>
+}
+
+templ siteHeader() {
+	<header class="flex shrink-0 items-center justify-between gap-4 py-8 sm:py-10">
+		<div class="flex items-center gap-3">
+			<span class="flex size-10 shrink-0 items-center justify-center rounded-2xl border border-granite-200 bg-birch text-fjord-700 shadow-xs">
+				@mark("size-5")
+			</span>
+			<div>
+				<p class="text-[0.68rem] font-semibold uppercase tracking-[0.2em] text-spruce-600">Digital twin</p>
+				<h1 class="font-display text-xl leading-tight text-fjord-900 sm:text-2xl">Ask my digital twin</h1>
+			</div>
+		</div>
+		<span class="hidden items-center gap-2 rounded-full border border-granite-200 bg-white/60 px-3 py-1 text-xs font-medium text-granite-600 sm:inline-flex">
+			<span class="size-1.5 rounded-full bg-spruce-600"></span>
+			Grounded in my notes
+		</span>
+	</header>
+}
+
+templ chatPanel() {
+	<section class="flex min-h-0 flex-1 flex-col overflow-hidden rounded-3xl border border-granite-200 bg-white/75 shadow-sm ring-1 ring-white/60 backdrop-blur-sm" aria-labelledby="chat-heading">
+		<div class="border-b border-granite-200/80 bg-birch/60 px-5 py-4 sm:px-7">
+			<h2 id="chat-heading" class="font-display text-lg leading-snug text-fjord-900">A conversation, not a search box</h2>
+			<p class="mt-1 max-w-xl text-sm leading-6 text-granite-600">Answers come only from my CV and notes. If something is not there, the twin should say so.</p>
+		</div>
+		<div id="chat-log" class="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-4 py-4 sm:px-7 sm:py-8" aria-label="Conversation">
+			@emptyState()
+		</div>
+		<p id="chat-status" class="sr-only" role="status" aria-live="polite"></p>
+	</section>
+}
+
+templ emptyState() {
+	<div id="chat-empty" class="m-auto flex w-full max-w-lg flex-col items-center px-2 py-4 text-center sm:py-8">
+		<div class="mb-5 flex size-14 items-center justify-center rounded-2xl border border-granite-200 bg-birch text-fjord-700">
+			@mark("size-7")
+		</div>
+		<p class="font-display text-2xl leading-tight text-fjord-900">What would you like to know?</p>
+		<p class="mt-2 max-w-md text-sm leading-6 text-granite-600">Ask about my work, the tools I use, or how I approach a problem. The twin will answer from my notes.</p>
+		<div class="mt-6 flex flex-wrap justify-center gap-2">
+			<button type="button" data-prompt="What have you built with Go?" class="cursor-pointer rounded-full border border-granite-200 bg-white/70 px-3 py-1.5 text-xs font-medium text-fjord-700 transition hover:border-fjord-500 hover:bg-fjord-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ochre-500 focus-visible:ring-offset-2 focus-visible:ring-offset-white">What have you built with Go?</button>
+			<button type="button" data-prompt="What are you working on now?" class="cursor-pointer rounded-full border border-granite-200 bg-white/70 px-3 py-1.5 text-xs font-medium text-fjord-700 transition hover:border-fjord-500 hover:bg-fjord-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ochre-500 focus-visible:ring-offset-2 focus-visible:ring-offset-white">What are you working on now?</button>
+			<button type="button" data-prompt="How do you approach a new problem?" class="cursor-pointer rounded-full border border-granite-200 bg-white/70 px-3 py-1.5 text-xs font-medium text-fjord-700 transition hover:border-fjord-500 hover:bg-fjord-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ochre-500 focus-visible:ring-offset-2 focus-visible:ring-offset-white">How do you approach a new problem?</button>
+		</div>
+	</div>
+}
+
+templ chatComposer() {
+	<form id="chat-form" class="shrink-0" aria-label="Ask a question">
+		<label for="chat-input" class="sr-only">Your question</label>
+		<div class="flex items-center gap-2 rounded-2xl border border-granite-200 bg-white p-2 shadow-lg shadow-fjord-900/5 transition focus-within:border-fjord-500 focus-within:ring-2 focus-within:ring-ochre-500">
+			<input id="chat-input" name="question" type="text" maxlength="500" required autocomplete="off" placeholder="Ask about my work, tools, or approach" aria-describedby="chat-hint chat-count" class="h-11 min-w-0 flex-1 bg-transparent px-2 text-base text-fjord-900 outline-none placeholder:text-granite-500 sm:text-sm"/>
+			<button type="submit" id="chat-submit" class="inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-xl bg-fjord-700 px-4 text-sm font-semibold text-snow shadow-sm transition hover:bg-fjord-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ochre-500 focus-visible:ring-offset-2 focus-visible:ring-offset-white disabled:cursor-not-allowed disabled:opacity-60">
+				<span data-role="submit-label">Ask</span>
+				<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" class="size-4" aria-hidden="true">
+					<path d="M4 10h11M11 5l5 5-5 5" stroke-linecap="round" stroke-linejoin="round"></path>
+				</svg>
+			</button>
+		</div>
+		<div class="mt-2 flex items-center justify-between gap-3 px-1 text-xs text-granite-600">
+			<span id="chat-hint">Enter to send</span>
+			<span id="chat-count" class="tabular-nums">0 / 500</span>
+		</div>
+	</form>
+}
+
+templ siteFooter() {
+	<footer class="flex shrink-0 flex-col gap-2 border-t border-granite-200/70 py-6 text-xs text-granite-600 sm:flex-row sm:items-center sm:justify-between">
+		<p>Answers are generated from my notes and may be inaccurate.</p>
+		<p>Built with Go, Templ, and Tailwind CSS.</p>
+	</footer>
+}
+
+templ mark(className string) {
+	<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" class={ className } aria-hidden="true">
+		<path d="M3 17.5 8.2 7l3.1 6.2L13.8 9l7.2 8.5" stroke-linecap="round" stroke-linejoin="round"></path>
+		<path d="M3 20h18" stroke-linecap="round" opacity=".45"></path>
+	</svg>
+}
+
+templ messageTemplates() {
+	<template id="user-message-template">
+		<div data-role="message" class="ml-auto max-w-[85%] rounded-2xl rounded-br-md bg-fjord-700 px-4 py-3 text-sm leading-6 text-snow shadow-sm">
+			<p data-role="text" class="whitespace-pre-wrap break-words"></p>
+		</div>
+	</template>
+	<template id="assistant-message-template">
+		<div data-role="message" data-streaming="true" class="mr-auto max-w-[88%] rounded-2xl rounded-bl-md border border-spruce-100 bg-spruce-100/70 px-4 py-3 text-sm leading-6 text-fjord-900 shadow-sm data-[error=true]:border-rust-200 data-[error=true]:bg-rust-50 data-[error=true]:text-rust-700">
+			<div class="mb-1 flex items-center gap-2 text-[0.62rem] font-semibold uppercase tracking-[0.15em] text-spruce-800">
+				<span class="size-1.5 rounded-full bg-spruce-600"></span>
+				Twin
+			</div>
+			<p data-role="text" class="whitespace-pre-wrap break-words"></p>
+			<span data-role="typing" class="mt-2 flex items-center gap-1" aria-hidden="true">
+				<span class="size-1.5 animate-typing rounded-full bg-spruce-600 [animation-delay:-300ms] motion-reduce:animate-none"></span>
+				<span class="size-1.5 animate-typing rounded-full bg-spruce-600 [animation-delay:-150ms] motion-reduce:animate-none"></span>
+				<span class="size-1.5 animate-typing rounded-full bg-spruce-600 motion-reduce:animate-none"></span>
+			</span>
+		</div>
+	</template>
+}

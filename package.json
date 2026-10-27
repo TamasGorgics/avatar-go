@@ -1,0 +1,19 @@
+{
+  "name": "avatar-go",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Frontend assets for avatar-go",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "css": "tailwindcss -i ./internal/web/assets/src/app.css -o ./internal/web/assets/app.css --minify",
+    "css:watch": "tailwindcss -i ./internal/web/assets/src/app.css -o ./internal/web/assets/app.css --watch",
+    "check:js": "node --check ./internal/web/assets/app.js",
+    "assets": "npm run css && npm run check:js"
+  },
+  "devDependencies": {
+    "@tailwindcss/cli": "4.3.3",
+    "tailwindcss": "4.3.3"
+  }
+}

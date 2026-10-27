@@ -1,9 +1,10 @@
 # AGENTS.md
 
 Small Go service (`main` at repo root) that serves a chat page and streams answers from an
-OpenAI-compatible API via `github.com/openai/openai-go/v3`. A small `Makefile` wraps the
-common build, test, and run commands. GitHub Actions runs formatting, vet, tests, and a
-build on pushes to `main` and pull requests; there is no other CI.
+OpenAI-compatible API via `github.com/openai/openai-go/v3`. The page is built with Templ
+and Tailwind CSS. A small `Makefile` wraps the common build, test, and run commands.
+GitHub Actions runs formatting, generated-asset checks, vet, tests, and a build on pushes
+to `main` and pull requests; there is no other CI.
 
 ## Layout
 
@@ -13,7 +14,13 @@ build on pushes to `main` and pull requests; there is no other CI.
 - `internal/logging` — `slog` setup: colored text for local terminals, JSON elsewhere.
 - `internal/ratelimit` — in-memory per-IP/hour and global daily limiter.
 - `internal/twin` — system prompt, SDK client, and `Chatter`/`Stream` interfaces.
-- `internal/web` — routes, chat handler/sanitization, access logs, and page HTML.
+- `internal/web` — routes, chat handler/sanitization, access logs, and the Templ page.
+  - `page.templ` is the page source; `page_templ.go` is generated and committed.
+  - `assets/src/app.css` is the Tailwind source; `assets/app.css` is generated and
+    committed. `assets/app.js` is handwritten and embedded with the CSS in `assets.go`.
+  - `page_templ.go` and `assets/app.css` must not be edited by hand.
+  - The page uses vanilla JS because `/chat` returns a plain-text stream; htmx and Alpine
+    are intentionally absent.
 
 `web.Limiter` and `twin.Chatter` exist so the HTTP layer can be tested with fakes; keep
 those seams. `ratelimit.NewWithClock` supports time-dependent tests without sleeping.
@@ -26,8 +33,14 @@ those seams. `ratelimit.NewWithClock` supports time-dependent tests without slee
 - Test: `make test`; `make race` when touching concurrency.
 - Check: `make check` runs vet, tests, and a build.
 - Focused test: `go test ./internal/web -run TestChatSuccess`
-- `make fmt` runs `go fmt ./...`; `make clean` removes the built binary.
-- Requires Go 1.27.1 per `go.mod`; SDK v3 itself needs Go 1.26+.
+- Frontend setup: `npm ci` once, then `make assets` after editing `.templ` or CSS files.
+  `make generate` runs Templ only; `make css` runs Tailwind only.
+- `make verify-assets` regenerates Templ and Tailwind output and fails if the committed
+  files differ. CI runs this.
+- `make fmt` runs `go fmt ./...` and `go tool templ fmt ./internal/web`; `make clean`
+  removes the built binary.
+- Requires Go 1.27.1 per `go.mod`; SDK v3 itself needs Go 1.26+. Frontend tooling needs
+  Node 22+ and npm, but normal `go build`/`go test` use the committed generated files.
 - SDK import path is versioned: `github.com/openai/openai-go/v3` (not `.../openai-go`).
 
 ## Tests
@@ -37,15 +50,18 @@ Tests sit beside the code; shared web fakes are in `internal/web/helpers_test.go
 `AVATAR_GO_MAIN_TEST=1` to exercise `main`; that signal test is skipped on Windows.
 `internal/twin` tests the SDK against an `httptest` SSE server, so no API key or network is
 needed. `internal/logging` tests JSON/text formats, levels, color, and grouped attrs;
-`internal/web` checks the access-log fields and severity. `internal/config` tests both
-environment parsing and `.env` syntax; the `main` subprocess test proves `.env` is loaded
-at startup by running from a temporary directory.
+`internal/web` checks the access-log fields and severity, page rendering, embedded assets,
+and the absence of inline page CSS/JS. `internal/config` tests both environment parsing and
+`.env` syntax; the `main` subprocess test proves `.env` is loaded at startup by running
+from a temporary directory.
 
 ## CI
 
 `.github/workflows/ci.yml` runs on pushes to `main` and pull requests. It uses the Go
-version from `go.mod`, then checks formatting, runs `go vet ./...`, `go test ./...` with a
-coverage profile, `go test -race ./...`, and `go build -o /dev/null .`.
+version from `go.mod`, installs Node dependencies with `npm ci`, regenerates Templ and
+Tailwind output with `make verify-assets`, then checks formatting, runs `go vet ./...`,
+`go test ./...` with a coverage profile, `go test -race ./...`, and
+`go build -o /dev/null .`.
 
 On pushes to `main`, CI also writes the total coverage to a shields.io endpoint JSON and
 publishes it to the dedicated `badges` branch. The README coverage badge reads
@@ -115,9 +131,9 @@ never logged. `http.Server.ErrorLog` is routed through the same logger.
 
 ## Behavior worth preserving
 
-- Routes: `GET /` (embedded HTML template) and `POST /chat` with body
-  `{"history":[{"role":"user"|"assistant","content":"..."}]}`. Response is a plain-text
-  stream of assistant deltas, not SSE.
+- Routes: `GET /` (Templ page), `GET /assets/` (embedded CSS/JS), and `POST /chat` with
+  body `{"history":[{"role":"user"|"assistant","content":"..."}]}`. The chat response is a
+  plain-text stream of assistant deltas, not SSE.
 - `/chat` sanitizes input deliberately: last 6 messages only, non-user/assistant roles
   dropped (clients cannot inject `system`), each message truncated to 500 bytes, body
   capped at 16 KB. Keep these guards when refactoring.
@@ -127,5 +143,7 @@ never logged. `http.Server.ErrorLog` is routed through the same logger.
 - `main.go` handles SIGINT/SIGTERM with `http.Server.Shutdown` and a 10s drain, so in-flight
   streams can finish. Do not replace it with a bare `http.ListenAndServe`/`log.Fatal`.
 - `max_completion_tokens` is intentional (newer OpenAI models reject `max_tokens`).
-- Page HTML/JS is in `internal/web/page.go`; the system prompt is in
-  `internal/twin/prompt.go`. There are no template/static files to edit.
+- Page markup is in `internal/web/page.templ`; page behavior is in
+  `internal/web/assets/app.js`; styles are in `internal/web/assets/src/app.css`. Regenerate
+  committed output with `make assets` after changing either source. The system prompt is in
+  `internal/twin/prompt.go`.

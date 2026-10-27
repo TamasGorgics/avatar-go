@@ -1,7 +1,7 @@
 package web
 
 import (
-	"html/template"
+	"bytes"
 	"log/slog"
 	"net/http"
 
@@ -18,7 +18,6 @@ type Server struct {
 	cfg  config.Config
 	lim  Limiter
 	chat twin.Chatter
-	page *template.Template
 	log  *slog.Logger
 }
 
@@ -30,7 +29,6 @@ func New(cfg config.Config, lim Limiter, chat twin.Chatter, logger *slog.Logger)
 		cfg:  cfg,
 		lim:  lim,
 		chat: chat,
-		page: template.Must(template.New("p").Parse(pageHTML)),
 		log:  logger,
 	}
 }
@@ -38,12 +36,22 @@ func New(cfg config.Config, lim Limiter, chat twin.Chatter, logger *slog.Logger)
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /{$}", s.handlePage)
+	mux.Handle("GET /assets/", assetHandler())
 	mux.HandleFunc("POST /chat", s.handleChat)
 	return s.logRequests(mux)
 }
 
-func (s *Server) handlePage(w http.ResponseWriter, _ *http.Request) {
-	if err := s.page.Execute(w, nil); err != nil {
+func (s *Server) handlePage(w http.ResponseWriter, r *http.Request) {
+	var buf bytes.Buffer
+	if err := Page().Render(r.Context(), &buf); err != nil {
 		s.log.Error("render page", "err", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache")
+	if _, err := buf.WriteTo(w); err != nil {
+		s.log.Error("write page", "err", err)
 	}
 }
