@@ -2,7 +2,8 @@
 
 Small Go service (`main` at repo root) that serves a chat page and streams answers from an
 OpenAI-compatible API via `github.com/openai/openai-go/v3`. A small `Makefile` wraps the
-common build, test, and run commands; there is no CI.
+common build, test, and run commands. GitHub Actions runs formatting, vet, tests, and a
+build on pushes to `main` and pull requests; there is no other CI.
 
 ## Layout
 
@@ -39,6 +40,12 @@ needed. `internal/logging` tests JSON/text formats, levels, color, and grouped a
 `internal/web` checks the access-log fields and severity. `internal/config` tests both
 environment parsing and `.env` syntax; the `main` subprocess test proves `.env` is loaded
 at startup by running from a temporary directory.
+
+## CI
+
+`.github/workflows/ci.yml` runs on pushes to `main` and pull requests. It uses the Go
+version from `go.mod`, then checks formatting, runs `go vet ./...`, `go test ./...`,
+`go test -race ./...`, and `go build -o /dev/null .`.
 
 ## The profile is embedded at compile time
 
