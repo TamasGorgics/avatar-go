@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -20,6 +21,21 @@ import (
 
 func testLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
+}
+
+func envWithout(keys ...string) []string {
+	blocked := make(map[string]bool, len(keys))
+	for _, key := range keys {
+		blocked[key] = true
+	}
+	env := make([]string, 0, len(os.Environ()))
+	for _, entry := range os.Environ() {
+		key, _, _ := strings.Cut(entry, "=")
+		if !blocked[key] {
+			env = append(env, entry)
+		}
+	}
+	return env
 }
 
 func TestServeDrainsInFlightRequests(t *testing.T) {
@@ -155,13 +171,32 @@ func TestMainStartsAndShutsDownGracefully(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestMainStartsAndShutsDownGracefully$")
-	cmd.Env = append(os.Environ(),
-		"AVATAR_GO_MAIN_TEST=1",
+	dir := t.TempDir()
+	envFile := strings.Join([]string{
 		"ADDR=127.0.0.1:0",
 		"OPENAI_API_KEY=test-key",
+		"LLM_MODEL=dotenv-model",
 		"LOG_FORMAT=json",
-	)
+		"",
+	}, "\n")
+	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte(envFile), 0o600); err != nil {
+		t.Fatalf("write .env: %v", err)
+	}
+
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatalf("executable: %v", err)
+	}
+	cmd := exec.CommandContext(ctx, exe, "-test.run=^TestMainStartsAndShutsDownGracefully$")
+	cmd.Dir = dir
+	cmd.Env = append(envWithout(
+		"ADDR",
+		"OPENAI_API_KEY",
+		"LLM_API_KEY",
+		"LLM_MODEL",
+		"LOG_FORMAT",
+		"LOG_LEVEL",
+	), "AVATAR_GO_MAIN_TEST=1")
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
 		t.Fatalf("stderr pipe: %v", err)
@@ -185,6 +220,11 @@ func TestMainStartsAndShutsDownGracefully(t *testing.T) {
 	if !ready {
 		_ = cmd.Wait()
 		t.Fatalf("main did not start:\n%s", logs.String())
+	}
+	if !strings.Contains(logs.String(), `"model":"dotenv-model"`) {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		t.Fatalf(".env was not loaded:\n%s", logs.String())
 	}
 
 	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {

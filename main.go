@@ -26,12 +26,18 @@ const shutdownTimeout = 10 * time.Second
 var about string
 
 func main() {
+	envErr := config.LoadDotEnv(".env")
 	cfg := config.Load()
 	logger := logging.New(logging.Options{
 		Format: cfg.LogFormat,
 		Level:  cfg.LogLevel,
 	})
 	slog.SetDefault(logger)
+
+	if envErr != nil {
+		logger.Error("load .env", "path", ".env", "err", envErr)
+		os.Exit(1)
+	}
 
 	if err := run(cfg, logger); err != nil {
 		logger.Error("server failed", "err", err)

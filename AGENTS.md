@@ -7,7 +7,7 @@ OpenAI-compatible API via `github.com/openai/openai-go/v3`. No CI or Makefile.
 
 - `main.go` — wiring, HTTP server lifecycle (graceful shutdown), and the `//go:embed
   about.md` profile.
-- `internal/config` — env loading (`Load`).
+- `internal/config` — env loading (`Load`) and optional `.env` parsing (`LoadDotEnv`).
 - `internal/logging` — `slog` setup: colored text for local terminals, JSON elsewhere.
 - `internal/ratelimit` — in-memory per-IP/hour and global daily limiter.
 - `internal/twin` — system prompt, SDK client, and `Chatter`/`Stream` interfaces.
@@ -18,7 +18,8 @@ those seams. `ratelimit.NewWithClock` supports time-dependent tests without slee
 
 ## Commands
 
-- Run: `go run .` (listens on `:8080` by default)
+- Run: `cp .env.example .env` (fill in the API key), then `go run .` (listens on `:8080`
+  by default)
 - Build: `go build -o avatar .`
 - Test: `go test ./...`; use `go test -race ./...` when touching concurrency.
 - Focused test: `go test ./internal/web -run TestChatSuccess`
@@ -34,7 +35,9 @@ Tests sit beside the code; shared web fakes are in `internal/web/helpers_test.go
 `AVATAR_GO_MAIN_TEST=1` to exercise `main`; that signal test is skipped on Windows.
 `internal/twin` tests the SDK against an `httptest` SSE server, so no API key or network is
 needed. `internal/logging` tests JSON/text formats, levels, color, and grouped attrs;
-`internal/web` checks the access-log fields and severity.
+`internal/web` checks the access-log fields and severity. `internal/config` tests both
+environment parsing and `.env` syntax; the `main` subprocess test proves `.env` is loaded
+at startup by running from a temporary directory.
 
 ## The profile is embedded at compile time
 
@@ -47,7 +50,15 @@ this file.
 
 ## Configuration
 
-All config is environment variables (read once at startup by `config.Load`):
+All config is environment variables. At startup `main` calls `config.LoadDotEnv(".env")`
+first, so a `.env` file in the working directory is applied when present. The file is
+optional, `.env` is gitignored, and real environment variables always win over it.
+`.env.example` lists every supported name with blank values; copy it to `.env` and fill in
+what you need. The loader supports `KEY=VALUE`, `export KEY=VALUE`, `#` comments, and
+single/double-quoted values. A malformed `.env` aborts startup with a line-numbered error
+rather than running with partial config.
+
+Config is then read once by `config.Load`:
 
 | Variable | Default | Notes |
 | --- | --- | --- |
