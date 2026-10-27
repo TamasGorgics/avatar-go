@@ -28,7 +28,7 @@ func TestChatSuccess(t *testing.T) {
 	lim := &fakeLimiter{allowed: true}
 	stream := &fakeStream{deltas: []string{"", "Hel", "lo", ""}}
 	chat := &fakeChatter{stream: stream}
-	srv := New(cfg, lim, chat)
+	srv := New(cfg, lim, chat, discardLogger())
 
 	rec := doChat(t, srv, validChatBody)
 
@@ -98,7 +98,7 @@ func TestChatSanitizesHistory(t *testing.T) {
 	}
 
 	chat := &fakeChatter{stream: &fakeStream{}}
-	srv := New(testConfig(), &fakeLimiter{allowed: true}, chat)
+	srv := New(testConfig(), &fakeLimiter{allowed: true}, chat, discardLogger())
 	rec := doChat(t, srv, string(body))
 
 	if rec.Code != http.StatusOK {
@@ -118,7 +118,7 @@ func TestChatSanitizesHistory(t *testing.T) {
 func TestChatRateLimited(t *testing.T) {
 	lim := &fakeLimiter{allowed: false}
 	chat := &fakeChatter{stream: &fakeStream{}}
-	srv := New(testConfig(), lim, chat)
+	srv := New(testConfig(), lim, chat, discardLogger())
 
 	// Invalid JSON proves the limiter runs before body parsing.
 	rec := doChat(t, srv, "not json")
@@ -154,7 +154,7 @@ func TestChatBadRequest(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			chat := &fakeChatter{stream: &fakeStream{}}
-			srv := New(testConfig(), &fakeLimiter{allowed: true}, chat)
+			srv := New(testConfig(), &fakeLimiter{allowed: true}, chat, discardLogger())
 			rec := doChat(t, srv, tc.body)
 
 			if rec.Code != http.StatusBadRequest {
@@ -169,7 +169,7 @@ func TestChatBadRequest(t *testing.T) {
 
 func TestChatUpstreamError(t *testing.T) {
 	chat := &fakeChatter{err: errors.New("upstream down")}
-	srv := New(testConfig(), &fakeLimiter{allowed: true}, chat)
+	srv := New(testConfig(), &fakeLimiter{allowed: true}, chat, discardLogger())
 
 	rec := doChat(t, srv, validChatBody)
 
@@ -187,7 +187,7 @@ func TestChatUpstreamError(t *testing.T) {
 func TestChatStreamErrorBeforeOutput(t *testing.T) {
 	stream := &fakeStream{err: errors.New("stream down")}
 	chat := &fakeChatter{stream: stream}
-	srv := New(testConfig(), &fakeLimiter{allowed: true}, chat)
+	srv := New(testConfig(), &fakeLimiter{allowed: true}, chat, discardLogger())
 
 	rec := doChat(t, srv, validChatBody)
 
@@ -205,7 +205,7 @@ func TestChatStreamErrorBeforeOutput(t *testing.T) {
 func TestChatStreamErrorAfterOutput(t *testing.T) {
 	stream := &fakeStream{deltas: []string{"partial"}, err: errors.New("stream broke")}
 	chat := &fakeChatter{stream: stream}
-	srv := New(testConfig(), &fakeLimiter{allowed: true}, chat)
+	srv := New(testConfig(), &fakeLimiter{allowed: true}, chat, discardLogger())
 
 	rec := doChat(t, srv, validChatBody)
 
@@ -227,7 +227,7 @@ func TestChatUsesForwardedIPWhenTrusted(t *testing.T) {
 	cfg := testConfig()
 	cfg.TrustProxy = true
 	lim := &fakeLimiter{allowed: true}
-	srv := New(cfg, lim, &fakeChatter{stream: &fakeStream{}})
+	srv := New(cfg, lim, &fakeChatter{stream: &fakeStream{}}, discardLogger())
 
 	req := httptest.NewRequest(http.MethodPost, "/chat", strings.NewReader(validChatBody))
 	req.RemoteAddr = "10.0.0.1:1234"
@@ -263,8 +263,9 @@ func (w *noFlushWriter) WriteHeader(status int) { w.status = status }
 func TestWriteStreamWithoutFlusher(t *testing.T) {
 	w := &noFlushWriter{}
 	stream := &fakeStream{deltas: []string{"", "hi"}}
+	srv := New(testConfig(), &fakeLimiter{allowed: true}, &fakeChatter{}, discardLogger())
 
-	writeStream(w, stream)
+	srv.writeStream(w, stream)
 
 	if got := w.body.String(); got != "hi" {
 		t.Fatalf("body = %q, want %q", got, "hi")

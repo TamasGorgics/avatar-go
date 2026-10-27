@@ -8,9 +8,10 @@ OpenAI-compatible API via `github.com/openai/openai-go/v3`. No CI or Makefile.
 - `main.go` — wiring, HTTP server lifecycle (graceful shutdown), and the `//go:embed
   about.md` profile.
 - `internal/config` — env loading (`Load`).
+- `internal/logging` — `slog` setup: colored text for local terminals, JSON elsewhere.
 - `internal/ratelimit` — in-memory per-IP/hour and global daily limiter.
 - `internal/twin` — system prompt, SDK client, and `Chatter`/`Stream` interfaces.
-- `internal/web` — routes, chat handler/sanitization, and page HTML.
+- `internal/web` — routes, chat handler/sanitization, access logs, and page HTML.
 
 `web.Limiter` and `twin.Chatter` exist so the HTTP layer can be tested with fakes; keep
 those seams. `ratelimit.NewWithClock` supports time-dependent tests without sleeping.
@@ -32,7 +33,8 @@ Tests sit beside the code; shared web fakes are in `internal/web/helpers_test.go
 `main_test.go` covers graceful drain/timeout and re-execs the test binary with
 `AVATAR_GO_MAIN_TEST=1` to exercise `main`; that signal test is skipped on Windows.
 `internal/twin` tests the SDK against an `httptest` SSE server, so no API key or network is
-needed.
+needed. `internal/logging` tests JSON/text formats, levels, color, and grouped attrs;
+`internal/web` checks the access-log fields and severity.
 
 ## The profile is embedded at compile time
 
@@ -56,11 +58,26 @@ All config is environment variables (read once at startup by `config.Load`):
 | `DAILY_CAP` | `300` | Global requests per calendar day |
 | `PER_IP_HOURLY` | `20` | Requests per client IP per rolling hour |
 | `TRUST_PROXY` | unset | Set to `1` only behind a trusted proxy (e.g. Caddy); enables `X-Forwarded-For` |
+| `LOG_FORMAT` | `auto` | `auto` = colored text on a terminal, JSON otherwise; `text`/`json` force a format |
+| `LOG_LEVEL` | `info` | `debug`, `info`, `warn`, or `error` |
 
 The client is built with explicit `option.WithAPIKey`/`option.WithBaseURL`, so the SDK's
 own defaults do not apply: `OPENAI_BASE_URL` is ignored — use `LLM_BASE_URL`. Missing API
 key is not validated at startup; requests fail with `502` and the error is logged. Invalid
-integer caps fall back to their defaults.
+integer caps fall back to their defaults; an invalid `LOG_FORMAT` falls back to `auto` and
+an invalid `LOG_LEVEL` to `info`.
+
+## Logging
+
+Logs go to stderr through `log/slog`. With `LOG_FORMAT=auto`, stderr being a terminal
+selects the development handler: ANSI-colored levels, a shortened source location, and
+logfmt-style metadata. Anything else (containers, systemd, pipes, CI) gets
+newline-delimited JSON. `NO_COLOR` or `TERM=dumb` disables color without changing formats.
+
+Every HTTP request logs `method`, `path`, `status`, `bytes`, `duration`, and `remote_ip`;
+4xx responses log at `WARN` and 5xx at `ERROR`. Rate-limit hits, upstream failures, stream
+errors, page-render errors, and shutdown problems include an `err` attribute. API keys are
+never logged. `http.Server.ErrorLog` is routed through the same logger.
 
 ## SDK notes
 

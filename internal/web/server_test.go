@@ -7,8 +7,15 @@ import (
 	"testing"
 )
 
+func TestNewUsesDefaultLogger(t *testing.T) {
+	srv := New(testConfig(), &fakeLimiter{allowed: true}, &fakeChatter{}, nil)
+	if srv.log == nil {
+		t.Fatal("logger is nil")
+	}
+}
+
 func TestRoutes(t *testing.T) {
-	srv := New(testConfig(), &fakeLimiter{allowed: true}, &fakeChatter{stream: &fakeStream{}})
+	srv := New(testConfig(), &fakeLimiter{allowed: true}, &fakeChatter{stream: &fakeStream{}}, discardLogger())
 
 	tests := []struct {
 		name   string
@@ -34,7 +41,7 @@ func TestRoutes(t *testing.T) {
 }
 
 func TestPage(t *testing.T) {
-	srv := New(testConfig(), &fakeLimiter{allowed: true}, &fakeChatter{stream: &fakeStream{}})
+	srv := New(testConfig(), &fakeLimiter{allowed: true}, &fakeChatter{stream: &fakeStream{}}, discardLogger())
 	rec := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
 

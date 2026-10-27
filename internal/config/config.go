@@ -13,6 +13,8 @@ type Config struct {
 	DailyCap    int
 	PerIPHourly int
 	TrustProxy  bool
+	LogFormat   string
+	LogLevel    string
 }
 
 func Load() Config {
@@ -24,6 +26,8 @@ func Load() Config {
 		DailyCap:    envInt("DAILY_CAP", 300),
 		PerIPHourly: envInt("PER_IP_HOURLY", 20),
 		TrustProxy:  os.Getenv("TRUST_PROXY") == "1",
+		LogFormat:   env("LOG_FORMAT", "auto"),
+		LogLevel:    env("LOG_LEVEL", "info"),
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -16,6 +17,10 @@ import (
 	"testing"
 	"time"
 )
+
+func testLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(io.Discard, nil))
+}
 
 func TestServeDrainsInFlightRequests(t *testing.T) {
 	startedCh := make(chan struct{})
@@ -43,7 +48,7 @@ func TestServeDrainsInFlightRequests(t *testing.T) {
 	defer cancel()
 
 	errCh := make(chan error, 1)
-	go func() { errCh <- serve(ctx, srv, ln, 2*time.Second) }()
+	go func() { errCh <- serve(ctx, testLogger(), srv, ln, 2*time.Second) }()
 
 	client := &http.Client{Timeout: 2 * time.Second}
 	resp, err := client.Get("http://" + ln.Addr().String() + "/slow")
@@ -111,7 +116,7 @@ func TestServeShutdownTimeout(t *testing.T) {
 	defer cancel()
 
 	errCh := make(chan error, 1)
-	go func() { errCh <- serve(ctx, srv, ln, 100*time.Millisecond) }()
+	go func() { errCh <- serve(ctx, testLogger(), srv, ln, 100*time.Millisecond) }()
 
 	client := &http.Client{Timeout: 2 * time.Second}
 	resp, err := client.Get("http://" + ln.Addr().String() + "/block")
@@ -155,6 +160,7 @@ func TestMainStartsAndShutsDownGracefully(t *testing.T) {
 		"AVATAR_GO_MAIN_TEST=1",
 		"ADDR=127.0.0.1:0",
 		"OPENAI_API_KEY=test-key",
+		"LOG_FORMAT=json",
 	)
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
@@ -171,7 +177,7 @@ func TestMainStartsAndShutsDownGracefully(t *testing.T) {
 		line := scanner.Text()
 		logs.WriteString(line)
 		logs.WriteByte('\n')
-		if strings.Contains(line, "listening on") {
+		if strings.Contains(line, `"msg":"listening"`) {
 			ready = true
 			break
 		}
@@ -212,7 +218,7 @@ func TestServeReturnsServeError(t *testing.T) {
 	}
 
 	srv := &http.Server{Handler: http.NewServeMux()}
-	err = serve(context.Background(), srv, ln, time.Second)
+	err = serve(context.Background(), testLogger(), srv, ln, time.Second)
 	if err == nil {
 		t.Fatal("serve returned nil, want an error")
 	}

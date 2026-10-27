@@ -2,10 +2,16 @@ package web
 
 import (
 	"context"
+	"io"
+	"log/slog"
 
 	"avatar-go/internal/config"
 	"avatar-go/internal/twin"
 )
+
+func discardLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(io.Discard, nil))
+}
 
 func testConfig() config.Config {
 	return config.Config{

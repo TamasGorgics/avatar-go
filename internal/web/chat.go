@@ -3,7 +3,6 @@ package web
 import (
 	"context"
 	"encoding/json"
-	"log"
 	"net"
 	"net/http"
 	"strings"
@@ -24,7 +23,13 @@ type chatMessage struct {
 }
 
 func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
-	if !s.lim.Allow(clientIP(r, s.cfg.TrustProxy), s.cfg.PerIPHourly, s.cfg.DailyCap) {
+	ip := clientIP(r, s.cfg.TrustProxy)
+	if !s.lim.Allow(ip, s.cfg.PerIPHourly, s.cfg.DailyCap) {
+		s.log.Warn("rate limited",
+			"ip", ip,
+			"per_ip_hourly", s.cfg.PerIPHourly,
+			"daily_cap", s.cfg.DailyCap,
+		)
 		http.Error(w, "Rate limit reached, please try again later.", http.StatusTooManyRequests)
 		return
 	}
@@ -42,15 +47,18 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
 	defer cancel()
 
-	stream, err := s.chat.Stream(ctx, sanitize(in.History))
+	history := sanitize(in.History)
+	s.log.Debug("chat request", "ip", ip, "messages", len(history))
+
+	stream, err := s.chat.Stream(ctx, history)
 	if err != nil {
-		log.Printf("upstream error: %v", err)
+		s.log.Error("upstream error", "err", err, "ip", ip)
 		http.Error(w, unavailableMsg, http.StatusBadGateway)
 		return
 	}
 	defer func() { _ = stream.Close() }()
 
-	writeStream(w, stream)
+	s.writeStream(w, stream)
 }
 
 // sanitize keeps the last messages, only user/assistant roles, capped length.
@@ -74,7 +82,7 @@ func sanitize(history []chatMessage) []twin.Message {
 	return msgs
 }
 
-func writeStream(w http.ResponseWriter, stream twin.Stream) {
+func (s *Server) writeStream(w http.ResponseWriter, stream twin.Stream) {
 	fl, _ := w.(http.Flusher)
 	wrote := false
 	for stream.Next() {
@@ -89,6 +97,7 @@ func writeStream(w http.ResponseWriter, stream twin.Stream) {
 			wrote = true
 		}
 		if _, err := w.Write([]byte(delta)); err != nil {
+			s.log.Debug("write response", "err", err)
 			return
 		}
 		if fl != nil {
@@ -96,7 +105,7 @@ func writeStream(w http.ResponseWriter, stream twin.Stream) {
 		}
 	}
 	if err := stream.Err(); err != nil {
-		log.Printf("upstream stream error: %v", err)
+		s.log.Error("upstream stream error", "err", err)
 		if !wrote {
 			http.Error(w, unavailableMsg, http.StatusBadGateway)
 		}

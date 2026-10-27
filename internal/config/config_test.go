@@ -11,6 +11,8 @@ var configEnv = []string{
 	"DAILY_CAP",
 	"PER_IP_HOURLY",
 	"TRUST_PROXY",
+	"LOG_FORMAT",
+	"LOG_LEVEL",
 }
 
 func clearEnv(t *testing.T) {
@@ -29,6 +31,8 @@ func TestLoadDefaults(t *testing.T) {
 		Model:       "gpt-4o-mini",
 		DailyCap:    300,
 		PerIPHourly: 20,
+		LogFormat:   "auto",
+		LogLevel:    "info",
 	}
 	if got := Load(); got != want {
 		t.Fatalf("Load() = %+v, want %+v", got, want)
@@ -45,6 +49,8 @@ func TestLoadOverrides(t *testing.T) {
 	t.Setenv("DAILY_CAP", "7")
 	t.Setenv("PER_IP_HOURLY", "3")
 	t.Setenv("TRUST_PROXY", "1")
+	t.Setenv("LOG_FORMAT", "json")
+	t.Setenv("LOG_LEVEL", "debug")
 
 	want := Config{
 		Addr:        ":9999",
@@ -54,6 +60,8 @@ func TestLoadOverrides(t *testing.T) {
 		DailyCap:    7,
 		PerIPHourly: 3,
 		TrustProxy:  true,
+		LogFormat:   "json",
+		LogLevel:    "debug",
 	}
 	if got := Load(); got != want {
 		t.Fatalf("Load() = %+v, want %+v", got, want)
