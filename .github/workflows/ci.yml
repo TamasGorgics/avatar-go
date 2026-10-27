@@ -12,6 +12,8 @@ jobs:
   check:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: write
 
     steps:
       - name: Check out code
@@ -36,10 +38,37 @@ jobs:
         run: go vet ./...
 
       - name: Test
-        run: go test ./...
+        run: go test ./... -coverprofile=coverage.out -covermode=atomic
 
       - name: Test with race detector
         run: go test -race ./...
 
       - name: Build
         run: go build -o /dev/null .
+
+      - name: Generate coverage badge
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          coverage="$(go tool cover -func=coverage.out | awk '/^total:/ {print $3}')"
+          percent="${coverage%\%}"
+          color="$(awk -v p="$percent" 'BEGIN {
+            if (p >= 90) print "brightgreen"
+            else if (p >= 80) print "green"
+            else if (p >= 70) print "yellowgreen"
+            else if (p >= 60) print "yellow"
+            else if (p >= 50) print "orange"
+            else print "red"
+          }')"
+          mkdir -p badge
+          printf '{"schemaVersion":1,"label":"coverage","message":"%s","color":"%s"}\n' \
+            "$coverage" "$color" > badge/coverage.json
+          cat badge/coverage.json
+
+      - name: Publish coverage badge
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_branch: badges
+          publish_dir: ./badge
+          force_orphan: true

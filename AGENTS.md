@@ -44,8 +44,12 @@ at startup by running from a temporary directory.
 ## CI
 
 `.github/workflows/ci.yml` runs on pushes to `main` and pull requests. It uses the Go
-version from `go.mod`, then checks formatting, runs `go vet ./...`, `go test ./...`,
-`go test -race ./...`, and `go build -o /dev/null .`.
+version from `go.mod`, then checks formatting, runs `go vet ./...`, `go test ./...` with a
+coverage profile, `go test -race ./...`, and `go build -o /dev/null .`.
+
+On pushes to `main`, CI also writes the total coverage to a shields.io endpoint JSON and
+publishes it to the dedicated `badges` branch. The README coverage badge reads
+`badges/coverage.json`; do not use that branch for anything else.
 
 ## The profile is embedded at compile time
 
