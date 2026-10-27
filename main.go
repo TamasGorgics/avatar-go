@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"errors"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -38,31 +39,48 @@ func main() {
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
+	ln, err := net.Listen("tcp", cfg.Addr)
+	if err != nil {
+		log.Fatalf("listen: %v", err)
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	// Once the first signal cancels ctx, restore default handling so a second signal
+	// terminates the process immediately.
+	restore := context.AfterFunc(ctx, stop)
+	defer restore()
 
+	log.Printf("listening on %s (model %s)", ln.Addr(), cfg.Model)
+	if err := serve(ctx, srv, ln, shutdownTimeout); err != nil {
+		log.Fatalf("server: %v", err)
+	}
+}
+
+// serve runs srv on ln until ctx is canceled, then drains in-flight requests.
+func serve(ctx context.Context, srv *http.Server, ln net.Listener, timeout time.Duration) error {
 	errCh := make(chan error, 1)
-	go func() { errCh <- srv.ListenAndServe() }()
+	go func() { errCh <- srv.Serve(ln) }()
 
-	log.Printf("listening on %s (model %s)", cfg.Addr, cfg.Model)
 	select {
 	case err := <-errCh:
-		if err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Fatalf("server: %v", err)
+		if errors.Is(err, http.ErrServerClosed) {
+			return nil
 		}
+		return err
 	case <-ctx.Done():
-		// Restore default signal handling so a second signal kills immediately.
-		stop()
 		log.Printf("shutting down")
 
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), timeout)
 		defer cancel()
-		if err := srv.Shutdown(shutdownCtx); err != nil {
-			log.Printf("graceful shutdown: %v", err)
+
+		shutdownErr := srv.Shutdown(shutdownCtx)
+		if shutdownErr != nil {
 			_ = srv.Close()
 		}
 		if err := <-errCh; err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Printf("server: %v", err)
+			return err
 		}
+		return shutdownErr
 	}
 }

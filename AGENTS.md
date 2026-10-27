@@ -1,7 +1,7 @@
 # AGENTS.md
 
 Small Go service (`main` at repo root) that serves a chat page and streams answers from an
-OpenAI-compatible API via `github.com/openai/openai-go/v3`. No tests, CI, or Makefile.
+OpenAI-compatible API via `github.com/openai/openai-go/v3`. No CI or Makefile.
 
 ## Layout
 
@@ -19,10 +19,20 @@ those seams. `ratelimit.NewWithClock` supports time-dependent tests without slee
 
 - Run: `go run .` (listens on `:8080` by default)
 - Build: `go build -o avatar .`
-- Verify: `go vet ./... && go build -o /dev/null .` — no tests yet; exercise `/chat` with
-  curl. Plain `go build ./...` leaves an untracked `avatar-go` binary in the repo root.
+- Test: `go test ./...`; use `go test -race ./...` when touching concurrency.
+- Focused test: `go test ./internal/web -run TestChatSuccess`
+- Verify: `go vet ./... && go test ./... && go build -o /dev/null .`. Plain
+  `go build ./...` leaves an untracked `avatar-go` binary in the repo root.
 - Requires Go 1.27.1 per `go.mod`; SDK v3 itself needs Go 1.26+.
 - SDK import path is versioned: `github.com/openai/openai-go/v3` (not `.../openai-go`).
+
+## Tests
+
+Tests sit beside the code; shared web fakes are in `internal/web/helpers_test.go`.
+`main_test.go` covers graceful drain/timeout and re-execs the test binary with
+`AVATAR_GO_MAIN_TEST=1` to exercise `main`; that signal test is skipped on Windows.
+`internal/twin` tests the SDK against an `httptest` SSE server, so no API key or network is
+needed.
 
 ## The profile is embedded at compile time
 
