@@ -1,7 +1,8 @@
 # AGENTS.md
 
 Small Go service (`main` at repo root) that serves a chat page and streams answers from an
-OpenAI-compatible API via `github.com/openai/openai-go/v3`. No CI or Makefile.
+OpenAI-compatible API via `github.com/openai/openai-go/v3`. A small `Makefile` wraps the
+common build, test, and run commands; there is no CI.
 
 ## Layout
 
@@ -18,13 +19,13 @@ those seams. `ratelimit.NewWithClock` supports time-dependent tests without slee
 
 ## Commands
 
-- Run: `cp .env.example .env` (fill in the API key), then `go run .` (listens on `:8080`
+- Run: `cp .env.example .env` (fill in the API key), then `make run` (listens on `:8080`
   by default)
-- Build: `go build -o avatar .`
-- Test: `go test ./...`; use `go test -race ./...` when touching concurrency.
+- Build: `make build` (writes `./avatar`; override with `make BINARY=other build`)
+- Test: `make test`; `make race` when touching concurrency.
+- Check: `make check` runs vet, tests, and a build.
 - Focused test: `go test ./internal/web -run TestChatSuccess`
-- Verify: `go vet ./... && go test ./... && go build -o /dev/null .`. Plain
-  `go build ./...` leaves an untracked `avatar-go` binary in the repo root.
+- `make fmt` runs `go fmt ./...`; `make clean` removes the built binary.
 - Requires Go 1.27.1 per `go.mod`; SDK v3 itself needs Go 1.26+.
 - SDK import path is versioned: `github.com/openai/openai-go/v3` (not `.../openai-go`).
 
