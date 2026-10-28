@@ -83,9 +83,17 @@ templ themeToggle() {
 
 templ chatPanel() {
 	<section class="flex min-h-0 flex-1 flex-col overflow-hidden rounded-3xl border border-line bg-surface/75 shadow-sm ring-1 ring-halo backdrop-blur-sm" aria-labelledby="chat-heading">
-		<div class="border-b border-line/80 bg-surface-soft/60 px-5 py-4 sm:px-7">
-			<h2 id="chat-heading" class="font-display text-lg leading-snug text-ink">A conversation, not a search box</h2>
-			<p class="mt-1 max-w-xl text-sm leading-6 text-ink-muted">Answers come only from my CV and notes. If something is not there, the twin should say so.</p>
+		<div class="flex items-start justify-between gap-4 border-b border-line/80 bg-surface-soft/60 px-5 py-4 sm:px-7">
+			<div>
+				<h2 id="chat-heading" class="font-display text-lg leading-snug text-ink">A conversation, not a search box</h2>
+				<p class="mt-1 max-w-xl text-sm leading-6 text-ink-muted">Answers come only from my CV and notes. If something is not there, the twin should say so.</p>
+			</div>
+			<button type="button" id="chat-clear" hidden aria-label="Clear conversation" class="mt-0.5 inline-flex h-8 shrink-0 cursor-pointer items-center gap-1.5 rounded-full border border-line bg-surface/70 px-3 text-xs font-medium text-ink-muted transition hover:border-accent-line hover:bg-accent-soft hover:text-accent-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-surface">
+				<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" class="size-3.5" aria-hidden="true">
+					<path d="M4.5 5.5h11M8 5.5V4h4v1.5M6 5.5l.7 10h6.6l.7-10M8.5 8v5M11.5 8v5" stroke-linecap="round" stroke-linejoin="round"></path>
+				</svg>
+				<span>Clear</span>
+			</button>
 		</div>
 		<div id="chat-log" class="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-4 py-4 sm:px-7 sm:py-8" aria-label="Conversation">
 			@emptyState()
@@ -151,17 +159,30 @@ templ messageTemplates() {
 		</div>
 	</template>
 	<template id="assistant-message-template">
-		<div data-role="message" data-streaming="true" class="mr-auto max-w-[88%] rounded-2xl rounded-bl-md border border-pine-soft bg-pine-soft/70 px-4 py-3 text-sm leading-6 text-ink shadow-sm data-[error=true]:border-danger-line data-[error=true]:bg-danger-soft data-[error=true]:text-danger">
+		<div data-role="message" data-state="streaming" data-streaming="true" class="mr-auto max-w-[88%] rounded-2xl rounded-bl-md border border-pine-soft bg-pine-soft/70 px-4 py-3 text-sm leading-6 text-ink shadow-sm transition-colors data-[error=true]:border-danger-line data-[error=true]:bg-danger-soft data-[error=true]:text-danger data-[state=interrupted]:border-danger-line data-[state=stopped]:border-line data-[state=stopped]:bg-surface-soft/70">
 			<div class="mb-1 flex items-center gap-2 text-[0.62rem] font-semibold uppercase tracking-[0.15em] text-pine-ink">
 				<span class="size-1.5 rounded-full bg-pine"></span>
 				Twin
 			</div>
 			<p data-role="text" class="whitespace-pre-wrap break-words"></p>
+			<p data-role="note" hidden data-tone="muted" class="mt-2 text-xs font-medium text-ink-muted data-[tone=danger]:text-danger"></p>
 			<span data-role="typing" class="mt-2 flex items-center gap-1" aria-hidden="true">
 				<span class="size-1.5 animate-typing rounded-full bg-pine [animation-delay:-300ms] motion-reduce:animate-none"></span>
 				<span class="size-1.5 animate-typing rounded-full bg-pine [animation-delay:-150ms] motion-reduce:animate-none"></span>
 				<span class="size-1.5 animate-typing rounded-full bg-pine motion-reduce:animate-none"></span>
 			</span>
+			<div data-role="actions" class="mt-3 flex flex-wrap items-center gap-1.5">
+				@messageAction("stop", "Stop", false)
+				@messageAction("retry", "Retry", true)
+				@messageAction("edit", "Edit question", true)
+				@messageAction("copy", "Copy", true)
+				@messageAction("regenerate", "Regenerate", true)
+				@messageAction("edit-last", "Edit last", true)
+			</div>
 		</div>
 	</template>
+}
+
+templ messageAction(action string, label string, hidden bool) {
+	<button type="button" data-action={ action } hidden?={ hidden } class="cursor-pointer rounded-full border border-line bg-surface/80 px-2.5 py-1 text-xs font-medium text-ink-muted transition hover:border-accent-line hover:bg-accent-soft hover:text-accent-text-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-surface disabled:cursor-not-allowed disabled:opacity-60">{ label }</button>
 }

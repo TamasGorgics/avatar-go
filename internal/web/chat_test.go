@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"avatar-go/internal/twin"
@@ -138,30 +139,70 @@ func TestChatSanitizesHistory(t *testing.T) {
 }
 
 func TestChatRateLimited(t *testing.T) {
-	lim := &fakeLimiter{allowed: false, reason: "per_ip_minute"}
-	chat := &fakeChatter{stream: &fakeStream{}}
-	srv := New(testConfig(), lim, chat, discardLogger())
+	tests := []struct {
+		name       string
+		reason     string
+		retryAfter time.Duration
+		wantBody   string
+		wantHeader string
+	}{
+		{
+			name:       "per ip minute",
+			reason:     "per_ip_minute",
+			retryAfter: 61 * time.Second,
+			wantBody:   rateLimitedMsg + "\n",
+			wantHeader: "61",
+		},
+		{
+			name:       "fractional seconds round up",
+			reason:     "global_minute",
+			retryAfter: 1500 * time.Millisecond,
+			wantBody:   rateLimitedMsg + "\n",
+			wantHeader: "2",
+		},
+		{
+			name:     "per ip concurrency",
+			reason:   "per_ip_concurrent",
+			wantBody: busyMsg + "\n",
+		},
+		{
+			name:     "global concurrency",
+			reason:   "global_concurrent",
+			wantBody: busyMsg + "\n",
+		},
+	}
 
-	// Invalid JSON proves the limiter runs before body parsing.
-	rec := doChat(t, srv, "not json")
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			lim := &fakeLimiter{allowed: false, reason: tc.reason, retryAfter: tc.retryAfter}
+			chat := &fakeChatter{stream: &fakeStream{}}
+			srv := New(testConfig(), lim, chat, discardLogger())
 
-	if rec.Code != http.StatusTooManyRequests {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusTooManyRequests)
-	}
-	if got := rec.Body.String(); got != rateLimitedMsg+"\n" {
-		t.Fatalf("body = %q", got)
-	}
-	if got := rec.Header().Get("Cache-Control"); got != "no-store" {
-		t.Errorf("Cache-Control = %q", got)
-	}
-	if lim.calls != 1 {
-		t.Errorf("limiter calls = %d, want 1", lim.calls)
-	}
-	if lim.released != 0 {
-		t.Errorf("limiter release count = %d, want 0", lim.released)
-	}
-	if chat.calls != 0 {
-		t.Errorf("chatter calls = %d, want 0", chat.calls)
+			// Invalid JSON proves the limiter runs before body parsing.
+			rec := doChat(t, srv, "not json")
+
+			if rec.Code != http.StatusTooManyRequests {
+				t.Fatalf("status = %d, want %d", rec.Code, http.StatusTooManyRequests)
+			}
+			if got := rec.Body.String(); got != tc.wantBody {
+				t.Fatalf("body = %q, want %q", got, tc.wantBody)
+			}
+			if got := rec.Header().Get("Retry-After"); got != tc.wantHeader {
+				t.Fatalf("Retry-After = %q, want %q", got, tc.wantHeader)
+			}
+			if got := rec.Header().Get("Cache-Control"); got != "no-store" {
+				t.Errorf("Cache-Control = %q", got)
+			}
+			if lim.calls != 1 {
+				t.Errorf("limiter calls = %d, want 1", lim.calls)
+			}
+			if lim.released != 0 {
+				t.Errorf("limiter release count = %d, want 0", lim.released)
+			}
+			if chat.calls != 0 {
+				t.Errorf("chatter calls = %d, want 0", chat.calls)
+			}
+		})
 	}
 }
 

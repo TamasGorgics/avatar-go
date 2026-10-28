@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"avatar-go/internal/config"
 	"avatar-go/internal/twin"
@@ -11,7 +12,7 @@ import (
 
 // Limiter is the abuse-protection dependency of the HTTP layer.
 type Limiter interface {
-	Begin(ip string) (allowed bool, reason string, release func())
+	Begin(ip string) (allowed bool, reason string, retryAfter time.Duration, release func())
 }
 
 type Server struct {

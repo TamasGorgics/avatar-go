@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"time"
 
 	"avatar-go/internal/config"
 	"avatar-go/internal/twin"
@@ -25,24 +26,25 @@ func testConfig() config.Config {
 }
 
 type fakeLimiter struct {
-	allowed  bool
-	reason   string
-	release  func()
-	calls    int
-	ip       string
-	released int
+	allowed    bool
+	reason     string
+	retryAfter time.Duration
+	release    func()
+	calls      int
+	ip         string
+	released   int
 }
 
-func (f *fakeLimiter) Begin(ip string) (bool, string, func()) {
+func (f *fakeLimiter) Begin(ip string) (bool, string, time.Duration, func()) {
 	f.calls++
 	f.ip = ip
 	if !f.allowed {
-		return false, f.reason, nil
+		return false, f.reason, f.retryAfter, nil
 	}
 	if f.release != nil {
-		return true, "", f.release
+		return true, "", 0, f.release
 	}
-	return true, "", func() { f.released++ }
+	return true, "", 0, func() { f.released++ }
 }
 
 type fakeChatter struct {

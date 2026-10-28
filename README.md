@@ -44,12 +44,29 @@ make fmt
 ```
 
 `make verify-assets` regenerates all three files and fails if the committed output is stale.
-`npm run test:js` runs the TypeScript stream and theme tests. `make check` still runs vet,
-tests, and a build; use `make race` when touching concurrency.
+`npm run test:js` runs the Vitest suites for streaming, theme, request history, session
+storage, and failure handling. `make check` still runs vet, tests, and a build; use
+`make race` when touching concurrency.
 
 The page follows the OS light/dark preference on first visit. The header switch stores an
 explicit choice in `localStorage`, updates the browser theme color, and is applied before
 first paint by a small bootstrap script in the page head.
+
+## Chat behavior
+
+Failed questions are recoverable. Rejected input offers **Edit question**, transient
+upstream and network failures offer **Retry**, and a time-window `429` shows a countdown
+from the server's `Retry-After` header before Retry is enabled. A concurrency `429` cannot
+predict when a slot will free up, so it shows a busy message with an immediate Retry.
+
+A running answer can be stopped. If any text arrived, the partial answer is kept in the
+conversation and marked as stopped; otherwise the question remains retryable. Completed and
+stopped answers offer **Copy**, and the latest turn also offers **Regenerate** and
+**Edit last**. **Clear** stops an in-flight answer and resets the transcript.
+
+Completed and stopped turns are restored for the current tab from `sessionStorage` under
+`avatar-go:chat:v1`, capped at 50 turns/32 KB. Failed attempts and countdowns are not
+restored, and conversations are never stored server-side.
 
 ## Security and limits
 
@@ -67,8 +84,9 @@ request cannot tie up the model indefinitely:
 
 A zero value denies that dimension; invalid or negative values fall back to the default.
 IPv6 clients are grouped by `/64` so rotating addresses within one allocation does not
-bypass the per-IP limits. State is in-memory and per-process, so limits reset on restart
-and are not shared across replicas.
+bypass the per-IP limits. Time-window `429`s include `Retry-After`; concurrency `429`s do
+not, because the server cannot predict when an active stream will finish. State is
+in-memory and per-process, so limits reset on restart and are not shared across replicas.
 
 `TRUST_PROXY=1` must only be used behind one trusted reverse proxy that overwrites or
 appends `X-Forwarded-For`; the server uses the rightmost entry and falls back to the

@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -21,6 +22,7 @@ const (
 	maxBodyBytes    = 16 << 10
 	unavailableMsg  = "The twin is unavailable right now."
 	rateLimitedMsg  = "Too many questions right now. Please try again later."
+	busyMsg         = "Another answer is still in progress. Please wait for it to finish."
 	rejectedMsg     = "That message can't be processed."
 )
 
@@ -33,10 +35,18 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 
 	ip := clientIP(r, s.cfg.TrustProxy)
-	allowed, reason, release := s.lim.Begin(ip)
+	allowed, reason, retryAfter, release := s.lim.Begin(ip)
 	if !allowed {
 		s.log.Warn("rate limited", "ip", ip, "reason", reason)
-		http.Error(w, rateLimitedMsg, http.StatusTooManyRequests)
+		if retryAfter > 0 {
+			seconds := int((retryAfter + time.Second - 1) / time.Second)
+			w.Header().Set("Retry-After", strconv.Itoa(seconds))
+		}
+		message := rateLimitedMsg
+		if reason == "per_ip_concurrent" || reason == "global_concurrent" {
+			message = busyMsg
+		}
+		http.Error(w, message, http.StatusTooManyRequests)
 		return
 	}
 	if release != nil {

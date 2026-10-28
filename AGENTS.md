@@ -27,6 +27,10 @@ to `main` and pull requests; there is no other CI.
     Alpine are intentionally absent. TypeScript is bundled with esbuild. The light/dark
     switch lives in `assets/src/js/theme.ts`; colors are semantic tokens in
     `assets/src/app.css`.
+  - `assets/src/js/chat.ts` is the turn-based chat controller. Completed and stopped turns
+    are the source of truth; failed attempts never enter model history. `chat-history.ts`,
+    `chat-storage.ts`, and `failure.ts` hold the pure history, session, and error logic so
+    they can be tested without a DOM.
 - `Dockerfile`, `.dockerignore`, and `compose.yaml` — multi-stage image and local Compose
   service. The image build only needs Go because generated frontend assets are committed.
 
@@ -71,8 +75,12 @@ parsing and `.env` syntax; the `main` subprocess test proves `.env` is loaded at
 running from a temporary directory.
 `internal/web/assets/src/js/stream.test.ts` uses Vitest and an injected clock to cover
 stream pacing, drain, cancellation, and reduced motion; `theme.test.ts` covers stored and
-system theme resolution; `chat.test.ts` covers history trimming. Run all with
-`make test-js`.
+system theme resolution; `chat-history.test.ts` covers last-six request history and
+stopped/empty answers; `chat-storage.test.ts` covers the versioned session schema, size
+caps, and corrupt data; `failure.test.ts` covers `Retry-After` parsing, failure
+classification, and countdown formatting. Run all with `make test-js`. The controller's
+DOM behavior is manually QA'd until Playwright lands; do not add a DOM emulation
+dependency for this layer without revisiting that decision.
 
 ## CI
 
@@ -175,6 +183,18 @@ logger.
 - Rate limits are checked before JSON parsing, so malformed requests still consume quota.
   Limiter state is in-memory: counters reset on restart and are per-process, so this is a
   spend guard, not a hard quota across replicas/redeploys.
+- Time-window `429`s include `Retry-After` in whole seconds, rounded up from the limiter's
+  estimate. Concurrency `429`s omit it and use a distinct busy message, because the server
+  cannot predict when a stream slot will free up. Keep that distinction when changing the
+  limiter.
+- The client treats completed and stopped turns as its transcript and model history. A
+  failed attempt never enters history: `Retry` reuses the question and user bubble,
+  `Edit` restores the question to the input, and `Stop` commits a partial answer only when
+  text arrived. Completed and stopped turns are restored from `sessionStorage` under
+  `avatar-go:chat:v1` (capped at 50 turns/32 KB); failed attempts and countdowns are not
+  persisted. Clear aborts an in-flight answer and removes the stored transcript.
+- The first six messages sent to `/chat` come from `turnsToHistory`, with the pending
+  question last. Keep the last-six rule when adding conversation controls.
 - Security headers (CSP, `X-Frame-Options: DENY`, `nosniff`, referrer and permissions
   policies) are applied to every response. The CSP allows `'unsafe-inline'` scripts only
   because of the single inline theme bootstrap; adding scripts should otherwise use

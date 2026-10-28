@@ -32,7 +32,7 @@ func testLimits() Limits {
 
 func mustBegin(t *testing.T, l *Limiter, ip string) func() {
 	t.Helper()
-	allowed, reason, release := l.Begin(ip)
+	allowed, reason, _, release := l.Begin(ip)
 	if !allowed {
 		t.Fatalf("Begin(%q) denied: %s", ip, reason)
 	}
@@ -61,7 +61,7 @@ func TestPerIPMinute(t *testing.T) {
 	mustBegin(t, l, "192.0.2.1")()
 	mustBegin(t, l, "192.0.2.1")()
 
-	allowed, reason, release := l.Begin("192.0.2.1")
+	allowed, reason, _, release := l.Begin("192.0.2.1")
 	if allowed || release != nil || reason != reasonPerIPMinute {
 		t.Fatalf("third request = (allowed=%v, reason=%q, release_nil=%v), want denied by %s", allowed, reason, release == nil, reasonPerIPMinute)
 	}
@@ -80,7 +80,7 @@ func TestPerIPHourly(t *testing.T) {
 	mustBegin(t, l, "192.0.2.1")()
 	mustBegin(t, l, "192.0.2.1")()
 
-	allowed, reason, release := l.Begin("192.0.2.1")
+	allowed, reason, _, release := l.Begin("192.0.2.1")
 	if allowed || release != nil || reason != reasonPerIPHour {
 		t.Fatalf("third request = (allowed=%v, reason=%q, release_nil=%v), want denied by %s", allowed, reason, release == nil, reasonPerIPHour)
 	}
@@ -99,7 +99,7 @@ func TestGlobalMinute(t *testing.T) {
 	mustBegin(t, l, "192.0.2.1")()
 	mustBegin(t, l, "192.0.2.2")()
 
-	allowed, reason, release := l.Begin("192.0.2.3")
+	allowed, reason, _, release := l.Begin("192.0.2.3")
 	if allowed || release != nil || reason != reasonGlobalMinute {
 		t.Fatalf("third request = (allowed=%v, reason=%q, release_nil=%v), want denied by %s", allowed, reason, release == nil, reasonGlobalMinute)
 	}
@@ -119,13 +119,116 @@ func TestGlobalDaily(t *testing.T) {
 	mustBegin(t, l, "192.0.2.1")()
 	mustBegin(t, l, "192.0.2.2")()
 
-	allowed, reason, release := l.Begin("192.0.2.3")
+	allowed, reason, _, release := l.Begin("192.0.2.3")
 	if allowed || release != nil || reason != reasonGlobalDaily {
 		t.Fatalf("third request = (allowed=%v, reason=%q, release_nil=%v), want denied by %s", allowed, reason, release == nil, reasonGlobalDaily)
 	}
 
 	clock.Advance(24 * time.Hour)
 	mustBegin(t, l, "192.0.2.3")()
+}
+
+func TestRetryAfterPerIPMinute(t *testing.T) {
+	clock := newTestClock()
+	limits := testLimits()
+	limits.PerIPMinute = 2
+	limits.PerIPHourly = 100
+	l := NewWithClock(clock.Now, limits)
+
+	mustBegin(t, l, "192.0.2.1")()
+	clock.Advance(10 * time.Second)
+	mustBegin(t, l, "192.0.2.1")()
+	clock.Advance(10 * time.Second)
+
+	allowed, reason, retryAfter, release := l.Begin("192.0.2.1")
+	if allowed || release != nil || reason != reasonPerIPMinute {
+		t.Fatalf("third request = (allowed=%v, reason=%q), want denied by %s", allowed, reason, reasonPerIPMinute)
+	}
+	if want := 40 * time.Second; retryAfter != want {
+		t.Fatalf("retryAfter = %v, want %v", retryAfter, want)
+	}
+}
+
+func TestRetryAfterPerIPHour(t *testing.T) {
+	clock := newTestClock()
+	limits := testLimits()
+	limits.PerIPMinute = 100
+	limits.PerIPHourly = 2
+	l := NewWithClock(clock.Now, limits)
+
+	mustBegin(t, l, "192.0.2.1")()
+	clock.Advance(10 * time.Minute)
+	mustBegin(t, l, "192.0.2.1")()
+	clock.Advance(10 * time.Minute)
+
+	allowed, reason, retryAfter, release := l.Begin("192.0.2.1")
+	if allowed || release != nil || reason != reasonPerIPHour {
+		t.Fatalf("third request = (allowed=%v, reason=%q), want denied by %s", allowed, reason, reasonPerIPHour)
+	}
+	if want := 40 * time.Minute; retryAfter != want {
+		t.Fatalf("retryAfter = %v, want %v", retryAfter, want)
+	}
+}
+
+func TestRetryAfterGlobalMinute(t *testing.T) {
+	clock := newTestClock()
+	limits := testLimits()
+	limits.PerIPMinute = 100
+	limits.GlobalMinute = 2
+	l := NewWithClock(clock.Now, limits)
+
+	mustBegin(t, l, "192.0.2.1")()
+	clock.Advance(15 * time.Second)
+	mustBegin(t, l, "192.0.2.2")()
+	clock.Advance(15 * time.Second)
+
+	allowed, reason, retryAfter, release := l.Begin("192.0.2.3")
+	if allowed || release != nil || reason != reasonGlobalMinute {
+		t.Fatalf("third request = (allowed=%v, reason=%q), want denied by %s", allowed, reason, reasonGlobalMinute)
+	}
+	if want := 30 * time.Second; retryAfter != want {
+		t.Fatalf("retryAfter = %v, want %v", retryAfter, want)
+	}
+}
+
+func TestRetryAfterGlobalDaily(t *testing.T) {
+	clock := newTestClock()
+	limits := testLimits()
+	limits.PerIPMinute = 100
+	limits.GlobalMinute = 100
+	limits.GlobalDaily = 2
+	l := NewWithClock(clock.Now, limits)
+
+	mustBegin(t, l, "192.0.2.1")()
+	mustBegin(t, l, "192.0.2.2")()
+
+	allowed, reason, retryAfter, release := l.Begin("192.0.2.3")
+	if allowed || release != nil || reason != reasonGlobalDaily {
+		t.Fatalf("third request = (allowed=%v, reason=%q), want denied by %s", allowed, reason, reasonGlobalDaily)
+	}
+	if want := 12 * time.Hour; retryAfter != want {
+		t.Fatalf("retryAfter = %v, want %v", retryAfter, want)
+	}
+}
+
+func TestRetryAfterZeroForConcurrency(t *testing.T) {
+	clock := newTestClock()
+	limits := testLimits()
+	limits.PerIPMinute = 100
+	limits.PerIPConcurrent = 1
+	l := NewWithClock(clock.Now, limits)
+
+	release := mustBegin(t, l, "192.0.2.1")
+
+	allowed, reason, retryAfter, deniedRelease := l.Begin("192.0.2.1")
+	if allowed || deniedRelease != nil || reason != reasonPerIPConcurrent {
+		t.Fatalf("second request = (allowed=%v, reason=%q), want denied by %s", allowed, reason, reasonPerIPConcurrent)
+	}
+	if retryAfter != 0 {
+		t.Fatalf("retryAfter = %v, want 0 for concurrency", retryAfter)
+	}
+
+	release()
 }
 
 func TestPerIPConcurrent(t *testing.T) {
@@ -137,7 +240,7 @@ func TestPerIPConcurrent(t *testing.T) {
 
 	release := mustBegin(t, l, "192.0.2.1")
 
-	allowed, reason, deniedRelease := l.Begin("192.0.2.1")
+	allowed, reason, _, deniedRelease := l.Begin("192.0.2.1")
 	if allowed || deniedRelease != nil || reason != reasonPerIPConcurrent {
 		t.Fatalf("second request = (allowed=%v, reason=%q, release_nil=%v), want denied by %s", allowed, reason, deniedRelease == nil, reasonPerIPConcurrent)
 	}
@@ -156,7 +259,7 @@ func TestGlobalConcurrent(t *testing.T) {
 
 	release := mustBegin(t, l, "192.0.2.1")
 
-	allowed, reason, deniedRelease := l.Begin("192.0.2.2")
+	allowed, reason, _, deniedRelease := l.Begin("192.0.2.2")
 	if allowed || deniedRelease != nil || reason != reasonGlobalConcurrent {
 		t.Fatalf("second request = (allowed=%v, reason=%q, release_nil=%v), want denied by %s", allowed, reason, deniedRelease == nil, reasonGlobalConcurrent)
 	}
@@ -193,7 +296,7 @@ func TestIPv6IsLimitedBy64(t *testing.T) {
 
 	mustBegin(t, l, "2001:db8::1")()
 
-	allowed, reason, release := l.Begin("2001:db8::2")
+	allowed, reason, _, release := l.Begin("2001:db8::2")
 	if allowed || release != nil || reason != reasonPerIPMinute {
 		t.Fatalf("same /64 = (allowed=%v, reason=%q, release_nil=%v), want denied by %s", allowed, reason, release == nil, reasonPerIPMinute)
 	}
@@ -279,7 +382,7 @@ func TestZeroLimitsDeny(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			l := NewWithClock(newTestClock().Now, tc.limits)
-			allowed, reason, release := l.Begin("192.0.2.1")
+			allowed, reason, _, release := l.Begin("192.0.2.1")
 			if allowed || release != nil || reason != tc.reason {
 				t.Fatalf("Begin() = (allowed=%v, reason=%q, release_nil=%v), want denied by %s", allowed, reason, release == nil, tc.reason)
 			}
@@ -307,7 +410,7 @@ func TestConcurrentDailyCap(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			ok, _, release := l.Begin("192.0.2.1")
+			ok, _, _, release := l.Begin("192.0.2.1")
 			if ok {
 				allowed.Add(1)
 				release()
@@ -344,7 +447,7 @@ func TestConcurrentSlots(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			<-start
-			ok, _, release := l.Begin("192.0.2.1")
+			ok, _, _, release := l.Begin("192.0.2.1")
 			if ok {
 				acquired.Add(1)
 				releases <- release
