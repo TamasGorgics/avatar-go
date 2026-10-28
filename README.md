@@ -77,16 +77,26 @@ request cannot tie up the model indefinitely:
 | --- | --- | --- |
 | `PER_IP_MINUTE` | `3` | Requests per client IP per rolling minute |
 | `PER_IP_HOURLY` | `20` | Requests per client IP per rolling hour |
-| `GLOBAL_MINUTE` | `20` | Requests across all clients per rolling minute |
-| `DAILY_CAP` | `300` | Requests across all clients per calendar day |
+| `PER_IP_DAILY_TOKENS` | `20000` | Estimated model tokens per client IP per calendar day |
+| `GLOBAL_MINUTE` | `20` | Validated model calls admitted across all clients per rolling minute |
+| `DAILY_CAP` | `300` | Validated model calls admitted across all clients per calendar day |
 | `PER_IP_CONCURRENT` | `1` | Active chat streams per client IP |
 | `GLOBAL_CONCURRENT` | `4` | Active chat streams across all clients |
 
 A zero value denies that dimension; invalid or negative values fall back to the default.
 IPv6 clients are grouped by `/64` so rotating addresses within one allocation does not
-bypass the per-IP limits. Time-window `429`s include `Retry-After`; concurrency `429`s do
-not, because the server cannot predict when an active stream will finish. State is
-in-memory and per-process, so limits reset on restart and are not shared across replicas.
+bypass the per-IP limits. Per-IP minute/hour limits count request attempts, including
+malformed requests. Global-minute, daily-call, per-IP token, and concurrency limits are
+reserved only after request validation, immediately before calling the model. A model-call
+admission consumes the global daily cap even if the upstream then fails.
+
+The per-IP token budget reserves an estimate from the system prompt and submitted history,
+plus the 400-token completion limit. When the upstream reports usage in its stream, the
+reservation is settled to that total; otherwise the estimate remains charged. This is an
+approximate in-memory spend guard, not an exact token meter or a hard quota across replicas.
+Time-window `429`s include `Retry-After`; concurrency `429`s do not, because the server
+cannot predict when an active stream will finish. Limiter state resets on restart and is
+not shared across replicas.
 
 `TRUST_PROXY=1` must only be used behind one trusted reverse proxy that overwrites or
 appends `X-Forwarded-For`; the server uses the rightmost entry and falls back to the

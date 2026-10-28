@@ -11,6 +11,7 @@ var configEnv = []string{
 	"DAILY_CAP",
 	"PER_IP_HOURLY",
 	"PER_IP_MINUTE",
+	"PER_IP_DAILY_TOKENS",
 	"GLOBAL_MINUTE",
 	"PER_IP_CONCURRENT",
 	"GLOBAL_CONCURRENT",
@@ -36,6 +37,7 @@ func TestLoadDefaults(t *testing.T) {
 		DailyCap:         300,
 		PerIPHourly:      20,
 		PerIPMinute:      3,
+		PerIPDailyTokens: 20_000,
 		GlobalMinute:     20,
 		PerIPConcurrent:  1,
 		GlobalConcurrent: 4,
@@ -57,6 +59,7 @@ func TestLoadOverrides(t *testing.T) {
 	t.Setenv("DAILY_CAP", "7")
 	t.Setenv("PER_IP_HOURLY", "3")
 	t.Setenv("PER_IP_MINUTE", "2")
+	t.Setenv("PER_IP_DAILY_TOKENS", "25000")
 	t.Setenv("GLOBAL_MINUTE", "9")
 	t.Setenv("PER_IP_CONCURRENT", "2")
 	t.Setenv("GLOBAL_CONCURRENT", "5")
@@ -72,6 +75,7 @@ func TestLoadOverrides(t *testing.T) {
 		DailyCap:         7,
 		PerIPHourly:      3,
 		PerIPMinute:      2,
+		PerIPDailyTokens: 25_000,
 		GlobalMinute:     9,
 		PerIPConcurrent:  2,
 		GlobalConcurrent: 5,
@@ -98,15 +102,16 @@ func TestLoadInvalidCapsUseDefaults(t *testing.T) {
 	t.Setenv("DAILY_CAP", "many")
 	t.Setenv("PER_IP_HOURLY", "1.5")
 	t.Setenv("PER_IP_MINUTE", "-1")
+	t.Setenv("PER_IP_DAILY_TOKENS", "many")
 	t.Setenv("GLOBAL_MINUTE", "soon")
 	t.Setenv("PER_IP_CONCURRENT", "-2")
 	t.Setenv("GLOBAL_CONCURRENT", "lots")
 
 	got := Load()
-	if got.DailyCap != 300 || got.PerIPHourly != 20 || got.PerIPMinute != 3 ||
+	if got.DailyCap != 300 || got.PerIPHourly != 20 || got.PerIPMinute != 3 || got.PerIPDailyTokens != 20_000 ||
 		got.GlobalMinute != 20 || got.PerIPConcurrent != 1 || got.GlobalConcurrent != 4 {
-		t.Fatalf("caps = (%d, %d, %d, %d, %d, %d), want (300, 20, 3, 20, 1, 4)",
-			got.DailyCap, got.PerIPHourly, got.PerIPMinute, got.GlobalMinute,
+		t.Fatalf("caps = (%d, %d, %d, %d, %d, %d, %d), want (300, 20, 3, 20000, 20, 1, 4)",
+			got.DailyCap, got.PerIPHourly, got.PerIPMinute, got.PerIPDailyTokens, got.GlobalMinute,
 			got.PerIPConcurrent, got.GlobalConcurrent)
 	}
 }
@@ -116,15 +121,16 @@ func TestLoadAcceptsZeroCaps(t *testing.T) {
 	t.Setenv("DAILY_CAP", "0")
 	t.Setenv("PER_IP_HOURLY", "0")
 	t.Setenv("PER_IP_MINUTE", "0")
+	t.Setenv("PER_IP_DAILY_TOKENS", "0")
 	t.Setenv("GLOBAL_MINUTE", "0")
 	t.Setenv("PER_IP_CONCURRENT", "0")
 	t.Setenv("GLOBAL_CONCURRENT", "0")
 
 	got := Load()
-	if got.DailyCap != 0 || got.PerIPHourly != 0 || got.PerIPMinute != 0 ||
+	if got.DailyCap != 0 || got.PerIPHourly != 0 || got.PerIPMinute != 0 || got.PerIPDailyTokens != 0 ||
 		got.GlobalMinute != 0 || got.PerIPConcurrent != 0 || got.GlobalConcurrent != 0 {
-		t.Fatalf("caps = (%d, %d, %d, %d, %d, %d), want all zero",
-			got.DailyCap, got.PerIPHourly, got.PerIPMinute, got.GlobalMinute,
+		t.Fatalf("caps = (%d, %d, %d, %d, %d, %d, %d), want all zero",
+			got.DailyCap, got.PerIPHourly, got.PerIPMinute, got.PerIPDailyTokens, got.GlobalMinute,
 			got.PerIPConcurrent, got.GlobalConcurrent)
 	}
 }

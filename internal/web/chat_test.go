@@ -13,6 +13,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"avatar-go/internal/ratelimit"
 	"avatar-go/internal/twin"
 )
 
@@ -57,8 +58,8 @@ func doChatRequest(t *testing.T, srv *Server, body, contentType string, headers 
 func TestChatSuccess(t *testing.T) {
 	cfg := testConfig()
 	lim := &fakeLimiter{allowed: true}
-	stream := &fakeStream{deltas: []string{"", "Hel", "lo", ""}}
-	chat := &fakeChatter{stream: stream}
+	stream := &fakeStream{deltas: []string{"", "Hel", "lo", ""}, tokens: 42, usageKnown: true}
+	chat := &fakeChatter{stream: stream, tokenEstimate: 123}
 	srv := New(cfg, lim, chat, discardLogger())
 
 	rec := doChat(t, srv, validChatBody)
@@ -85,11 +86,17 @@ func TestChatSuccess(t *testing.T) {
 	if lim.calls != 1 {
 		t.Errorf("limiter calls = %d, want 1", lim.calls)
 	}
+	if lim.reserveCalls != 1 || lim.reservedTokens != 123 {
+		t.Errorf("model reservations = (%d calls, %d tokens), want (1, 123)", lim.reserveCalls, lim.reservedTokens)
+	}
 	if lim.ip != "203.0.113.9" {
 		t.Errorf("limiter IP = %q, want %q", lim.ip, "203.0.113.9")
 	}
 	if lim.released != 1 {
 		t.Errorf("limiter release count = %d, want 1", lim.released)
+	}
+	if !lim.usageKnown || lim.settledTokens != 42 {
+		t.Errorf("settled usage = (%d, %v), want (42, true)", lim.settledTokens, lim.usageKnown)
 	}
 
 	if chat.calls != 1 {
@@ -154,21 +161,18 @@ func TestChatRateLimited(t *testing.T) {
 			wantHeader: "61",
 		},
 		{
+			name:       "per ip hour",
+			reason:     "per_ip_hour",
+			retryAfter: 5 * time.Second,
+			wantBody:   rateLimitedMsg + "\n",
+			wantHeader: "5",
+		},
+		{
 			name:       "fractional seconds round up",
 			reason:     "global_minute",
 			retryAfter: 1500 * time.Millisecond,
 			wantBody:   rateLimitedMsg + "\n",
 			wantHeader: "2",
-		},
-		{
-			name:     "per ip concurrency",
-			reason:   "per_ip_concurrent",
-			wantBody: busyMsg + "\n",
-		},
-		{
-			name:     "global concurrency",
-			reason:   "global_concurrent",
-			wantBody: busyMsg + "\n",
 		},
 	}
 
@@ -196,8 +200,79 @@ func TestChatRateLimited(t *testing.T) {
 			if lim.calls != 1 {
 				t.Errorf("limiter calls = %d, want 1", lim.calls)
 			}
+			if lim.reserveCalls != 0 {
+				t.Errorf("model reservations = %d, want 0 for an early attempt denial", lim.reserveCalls)
+			}
 			if lim.released != 0 {
 				t.Errorf("limiter release count = %d, want 0", lim.released)
+			}
+			if chat.calls != 0 {
+				t.Errorf("chatter calls = %d, want 0", chat.calls)
+			}
+		})
+	}
+}
+
+func TestChatModelLimitsAreCheckedAfterValidation(t *testing.T) {
+	tests := []struct {
+		name       string
+		reason     string
+		retryAfter time.Duration
+		wantBody   string
+		wantHeader string
+	}{
+		{
+			name:       "global minute",
+			reason:     "global_minute",
+			retryAfter: 61 * time.Second,
+			wantBody:   rateLimitedMsg + "\n",
+			wantHeader: "61",
+		},
+		{
+			name:       "per ip daily tokens",
+			reason:     "per_ip_daily_tokens",
+			retryAfter: 1500 * time.Millisecond,
+			wantBody:   rateLimitedMsg + "\n",
+			wantHeader: "2",
+		},
+		{
+			name:     "global concurrency",
+			reason:   "global_concurrent",
+			wantBody: busyMsg + "\n",
+		},
+		{
+			name:     "per ip concurrency",
+			reason:   "per_ip_concurrent",
+			wantBody: busyMsg + "\n",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			lim := &fakeLimiter{
+				allowed:     true,
+				denyModel:   true,
+				modelReason: tc.reason,
+				modelRetry:  tc.retryAfter,
+			}
+			chat := &fakeChatter{stream: &fakeStream{}}
+			srv := New(testConfig(), lim, chat, discardLogger())
+			rec := doChat(t, srv, validChatBody)
+
+			if rec.Code != http.StatusTooManyRequests {
+				t.Fatalf("status = %d, want %d", rec.Code, http.StatusTooManyRequests)
+			}
+			if got := rec.Body.String(); got != tc.wantBody {
+				t.Errorf("body = %q, want %q", got, tc.wantBody)
+			}
+			if got := rec.Header().Get("Retry-After"); got != tc.wantHeader {
+				t.Errorf("Retry-After = %q, want %q", got, tc.wantHeader)
+			}
+			if lim.calls != 1 || lim.reserveCalls != 1 {
+				t.Errorf("limiter calls = (%d attempts, %d reservations), want (1, 1)", lim.calls, lim.reserveCalls)
+			}
+			if lim.released != 0 {
+				t.Errorf("finish calls = %d, want 0 for denied reservation", lim.released)
 			}
 			if chat.calls != 0 {
 				t.Errorf("chatter calls = %d, want 0", chat.calls)
@@ -234,7 +309,8 @@ func TestChatBadRequest(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			chat := &fakeChatter{stream: &fakeStream{}}
-			srv := New(testConfig(), &fakeLimiter{allowed: true}, chat, discardLogger())
+			lim := &fakeLimiter{allowed: true}
+			srv := New(testConfig(), lim, chat, discardLogger())
 			rec := doChat(t, srv, tc.body)
 
 			want := tc.wantStatus
@@ -247,7 +323,51 @@ func TestChatBadRequest(t *testing.T) {
 			if chat.calls != 0 {
 				t.Errorf("chatter calls = %d, want 0", chat.calls)
 			}
+			if lim.reserveCalls != 0 {
+				t.Errorf("model reservations = %d, want 0 for invalid request", lim.reserveCalls)
+			}
 		})
+	}
+}
+
+func TestMalformedRequestsDoNotConsumeModelBudgets(t *testing.T) {
+	now := time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC)
+	lim := ratelimit.NewWithClock(func() time.Time { return now }, ratelimit.Limits{
+		PerIPMinute:      10,
+		PerIPHourly:      20,
+		PerIPDailyTokens: 1000,
+		GlobalMinute:     10,
+		GlobalDaily:      10,
+		PerIPConcurrent:  1,
+		GlobalConcurrent: 4,
+	})
+	chat := &fakeChatter{stream: &fakeStream{}, tokenEstimate: 900}
+	srv := New(testConfig(), lim, chat, discardLogger())
+
+	for i := 0; i < 2; i++ {
+		rec := doChat(t, srv, "not json")
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("malformed request %d status = %d, want %d", i+1, rec.Code, http.StatusBadRequest)
+		}
+	}
+
+	valid := doChat(t, srv, validChatBody)
+	if valid.Code != http.StatusOK {
+		t.Fatalf("valid request status = %d, want %d (body %q)", valid.Code, http.StatusOK, valid.Body.String())
+	}
+	if chat.calls != 1 {
+		t.Fatalf("chatter calls = %d after valid request, want 1", chat.calls)
+	}
+
+	// The valid call's estimated token reservation is charged; another call
+	// that would exceed the per-IP budget is rejected before reaching the model.
+	chat.tokenEstimate = 200
+	overBudget := doChat(t, srv, validChatBody)
+	if overBudget.Code != http.StatusTooManyRequests {
+		t.Fatalf("over-budget status = %d, want %d", overBudget.Code, http.StatusTooManyRequests)
+	}
+	if chat.calls != 1 {
+		t.Fatalf("chatter calls = %d after over-budget request, want 1", chat.calls)
 	}
 }
 
@@ -268,7 +388,8 @@ func TestChatRequiresJSON(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			chat := &fakeChatter{stream: &fakeStream{}}
-			srv := New(testConfig(), &fakeLimiter{allowed: true}, chat, discardLogger())
+			lim := &fakeLimiter{allowed: true}
+			srv := New(testConfig(), lim, chat, discardLogger())
 			rec := doChatRequest(t, srv, validChatBody, tc.contentType, nil)
 
 			if rec.Code != tc.wantStatus {
@@ -280,6 +401,13 @@ func TestChatRequiresJSON(t *testing.T) {
 			}
 			if chat.calls != wantCalls {
 				t.Errorf("chatter calls = %d, want %d", chat.calls, wantCalls)
+			}
+			wantReservations := 0
+			if tc.wantStatus == http.StatusOK {
+				wantReservations = 1
+			}
+			if lim.reserveCalls != wantReservations {
+				t.Errorf("model reservations = %d, want %d", lim.reserveCalls, wantReservations)
 			}
 		})
 	}
@@ -305,7 +433,8 @@ func TestChatSameOrigin(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			chat := &fakeChatter{stream: &fakeStream{}}
-			srv := New(testConfig(), &fakeLimiter{allowed: true}, chat, discardLogger())
+			lim := &fakeLimiter{allowed: true}
+			srv := New(testConfig(), lim, chat, discardLogger())
 			rec := doChatWithHeaders(t, srv, validChatBody, tc.headers)
 
 			if rec.Code != tc.wantStatus {
@@ -317,6 +446,13 @@ func TestChatSameOrigin(t *testing.T) {
 			}
 			if chat.calls != wantCalls {
 				t.Errorf("chatter calls = %d, want %d", chat.calls, wantCalls)
+			}
+			wantReservations := 0
+			if tc.wantStatus == http.StatusOK {
+				wantReservations = 1
+			}
+			if lim.reserveCalls != wantReservations {
+				t.Errorf("model reservations = %d, want %d", lim.reserveCalls, wantReservations)
 			}
 		})
 	}
@@ -344,7 +480,8 @@ func TestChatRejectsInjection(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			chat := &fakeChatter{stream: &fakeStream{}}
-			srv := New(testConfig(), &fakeLimiter{allowed: true}, chat, discardLogger())
+			lim := &fakeLimiter{allowed: true}
+			srv := New(testConfig(), lim, chat, discardLogger())
 			rec := doChat(t, srv, chatBody(t, tc.history...))
 
 			if rec.Code != http.StatusBadRequest {
@@ -355,6 +492,9 @@ func TestChatRejectsInjection(t *testing.T) {
 			}
 			if chat.calls != 0 {
 				t.Errorf("chatter calls = %d, want 0", chat.calls)
+			}
+			if lim.reserveCalls != 0 {
+				t.Errorf("model reservations = %d, want 0 for injection rejection", lim.reserveCalls)
 			}
 		})
 	}

@@ -10,9 +10,10 @@ import (
 	"avatar-go/internal/twin"
 )
 
-// Limiter is the abuse-protection dependency of the HTTP layer.
+// Limiter separates early request-attempt checks from model-call admission.
 type Limiter interface {
-	Begin(ip string) (allowed bool, reason string, retryAfter time.Duration, release func())
+	CheckAttempt(ip string) (allowed bool, reason string, retryAfter time.Duration)
+	ReserveModel(ip string, estimatedTokens int) (allowed bool, reason string, retryAfter time.Duration, finish func(actualTokens int, usageKnown bool))
 }
 
 type Server struct {

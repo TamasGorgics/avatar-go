@@ -26,33 +26,58 @@ func testConfig() config.Config {
 }
 
 type fakeLimiter struct {
-	allowed    bool
-	reason     string
-	retryAfter time.Duration
-	release    func()
-	calls      int
-	ip         string
-	released   int
+	allowed        bool
+	reason         string
+	retryAfter     time.Duration
+	denyModel      bool
+	modelReason    string
+	modelRetry     time.Duration
+	calls          int
+	reserveCalls   int
+	ip             string
+	reservedTokens int
+	settledTokens  int
+	usageKnown     bool
+	released       int
 }
 
-func (f *fakeLimiter) Begin(ip string) (bool, string, time.Duration, func()) {
+func (f *fakeLimiter) CheckAttempt(ip string) (bool, string, time.Duration) {
 	f.calls++
 	f.ip = ip
 	if !f.allowed {
-		return false, f.reason, f.retryAfter, nil
+		return false, f.reason, f.retryAfter
 	}
-	if f.release != nil {
-		return true, "", 0, f.release
+	return true, "", 0
+}
+
+func (f *fakeLimiter) ReserveModel(_ string, estimatedTokens int) (bool, string, time.Duration, func(int, bool)) {
+	f.reserveCalls++
+	f.reservedTokens = estimatedTokens
+	if f.denyModel {
+		reason := f.modelReason
+		if reason == "" {
+			reason = f.reason
+		}
+		retryAfter := f.modelRetry
+		if retryAfter == 0 {
+			retryAfter = f.retryAfter
+		}
+		return false, reason, retryAfter, nil
 	}
-	return true, "", 0, func() { f.released++ }
+	return true, "", 0, func(actualTokens int, usageKnown bool) {
+		f.released++
+		f.settledTokens = actualTokens
+		f.usageKnown = usageKnown
+	}
 }
 
 type fakeChatter struct {
-	stream  twin.Stream
-	err     error
-	calls   int
-	history []twin.Message
-	ctx     context.Context
+	stream        twin.Stream
+	err           error
+	calls         int
+	history       []twin.Message
+	ctx           context.Context
+	tokenEstimate int
 }
 
 func (f *fakeChatter) Stream(ctx context.Context, history []twin.Message) (twin.Stream, error) {
@@ -62,11 +87,17 @@ func (f *fakeChatter) Stream(ctx context.Context, history []twin.Message) (twin.
 	return f.stream, f.err
 }
 
+func (f *fakeChatter) EstimateTokenReservation([]twin.Message) int {
+	return f.tokenEstimate
+}
+
 type fakeStream struct {
-	deltas []string
-	err    error
-	index  int
-	closed bool
+	deltas     []string
+	err        error
+	index      int
+	closed     bool
+	tokens     int
+	usageKnown bool
 }
 
 func (s *fakeStream) Next() bool {
@@ -83,6 +114,8 @@ func (s *fakeStream) Text() string {
 	}
 	return s.deltas[s.index-1]
 }
+
+func (s *fakeStream) TokenUsage() (int, bool) { return s.tokens, s.usageKnown }
 
 func (s *fakeStream) Err() error {
 	return s.err

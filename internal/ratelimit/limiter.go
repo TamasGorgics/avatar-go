@@ -9,6 +9,7 @@ import (
 const (
 	reasonPerIPMinute      = "per_ip_minute"
 	reasonPerIPHour        = "per_ip_hour"
+	reasonPerIPDailyTokens = "per_ip_daily_tokens"
 	reasonGlobalMinute     = "global_minute"
 	reasonGlobalDaily      = "global_daily"
 	reasonPerIPConcurrent  = "per_ip_concurrent"
@@ -17,11 +18,12 @@ const (
 	sweepInterval = 10 * time.Minute
 )
 
-// Limits are the configured abuse-protection thresholds. A zero or negative
-// value denies every request for that dimension.
+// Limits are the configured request-attempt and model-admission thresholds. A
+// zero or negative value denies every request for that dimension.
 type Limits struct {
 	PerIPMinute      int
 	PerIPHourly      int
+	PerIPDailyTokens int
 	GlobalMinute     int
 	GlobalDaily      int
 	PerIPConcurrent  int
@@ -29,8 +31,10 @@ type Limits struct {
 }
 
 type ipState struct {
-	times  []time.Time
-	active int
+	attempts   []time.Time
+	active     int
+	tokenDay   string
+	usedTokens int
 }
 
 type Limiter struct {
@@ -58,19 +62,56 @@ func NewWithClock(now func() time.Time, limits Limits) *Limiter {
 	}
 }
 
-// Begin reserves a rate-limit slot and an active stream slot. On success it
-// returns a release function that must be called when the stream finishes.
-// On failure release is nil, reason names the limit that was hit, and
-// retryAfter is the time until that limit is expected to free up. retryAfter
-// is zero when no useful estimate exists, such as for concurrency limits.
-func (l *Limiter) Begin(ip string) (allowed bool, reason string, retryAfter time.Duration, release func()) {
+// CheckAttempt applies the per-IP request-attempt limits. Call it before
+// parsing the body so malformed requests still consume anti-abuse quota.
+func (l *Limiter) CheckAttempt(ip string) (allowed bool, reason string, retryAfter time.Duration) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
 	now := l.now()
 	l.sweep(now)
+	state := l.stateFor(ip, now)
+	l.pruneAttempts(state, now)
 
-	if today := now.Format("2006-01-02"); today != l.day {
+	if len(state.attempts) >= l.limits.PerIPHourly {
+		var oldest time.Time
+		if len(state.attempts) > 0 {
+			oldest = state.attempts[0]
+		}
+		return false, reasonPerIPHour, until(oldest, time.Hour, now)
+	}
+
+	minuteCount := 0
+	var oldestMinute time.Time
+	cutMinute := now.Add(-time.Minute)
+	for _, t := range state.attempts {
+		if t.After(cutMinute) {
+			minuteCount++
+			if oldestMinute.IsZero() {
+				oldestMinute = t
+			}
+		}
+	}
+	if minuteCount >= l.limits.PerIPMinute {
+		return false, reasonPerIPMinute, until(oldestMinute, time.Minute, now)
+	}
+
+	state.attempts = append(state.attempts, now)
+	return true, "", 0
+}
+
+// ReserveModel atomically checks and reserves all model-call limits. estimatedTokens
+// is charged up front so simultaneous requests cannot oversubscribe a per-IP daily
+// budget. The returned finish function settles to actual usage when available and
+// releases the active-stream slots; call it once when the model stream is done.
+func (l *Limiter) ReserveModel(ip string, estimatedTokens int) (allowed bool, reason string, retryAfter time.Duration, finish func(actualTokens int, usageKnown bool)) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	now := l.now()
+	l.sweep(now)
+	today := dayKey(now)
+	if today != l.day {
 		l.day, l.dayCount = today, 0
 	}
 	if l.limits.GlobalDaily <= 0 {
@@ -96,42 +137,15 @@ func (l *Limiter) Begin(ip string) (allowed bool, reason string, retryAfter time
 		return false, reasonGlobalMinute, until(oldest, time.Minute, now), nil
 	}
 
-	key := limitKey(ip)
-	state := l.perIP[key]
-	if state == nil {
-		state = &ipState{}
-		l.perIP[key] = state
+	state := l.stateFor(ip, now)
+	if estimatedTokens < 0 {
+		estimatedTokens = 0
 	}
-
-	cutHour := now.Add(-time.Hour)
-	kept := state.times[:0]
-	for _, t := range state.times {
-		if t.After(cutHour) {
-			kept = append(kept, t)
-		}
+	if l.limits.PerIPDailyTokens <= 0 {
+		return false, reasonPerIPDailyTokens, 0, nil
 	}
-	state.times = kept
-
-	if len(state.times) >= l.limits.PerIPHourly {
-		var oldest time.Time
-		if len(state.times) > 0 {
-			oldest = state.times[0]
-		}
-		return false, reasonPerIPHour, until(oldest, time.Hour, now), nil
-	}
-
-	minuteCount := 0
-	var oldestMinute time.Time
-	for _, t := range state.times {
-		if t.After(cutMinute) {
-			minuteCount++
-			if oldestMinute.IsZero() {
-				oldestMinute = t
-			}
-		}
-	}
-	if minuteCount >= l.limits.PerIPMinute {
-		return false, reasonPerIPMinute, until(oldestMinute, time.Minute, now), nil
+	if state.usedTokens >= l.limits.PerIPDailyTokens || estimatedTokens > l.limits.PerIPDailyTokens-state.usedTokens {
+		return false, reasonPerIPDailyTokens, untilNextDay(now), nil
 	}
 	if state.active >= l.limits.PerIPConcurrent {
 		return false, reasonPerIPConcurrent, 0, nil
@@ -140,22 +154,59 @@ func (l *Limiter) Begin(ip string) (allowed bool, reason string, retryAfter time
 		return false, reasonGlobalConcurrent, 0, nil
 	}
 
-	state.times = append(state.times, now)
+	state.usedTokens += estimatedTokens
 	state.active++
 	l.globalTimes = append(l.globalTimes, now)
 	l.globalLive++
 	l.dayCount++
 
 	var once sync.Once
-	release = func() {
+	reservedDay := state.tokenDay
+	finish = func(actualTokens int, usageKnown bool) {
 		once.Do(func() {
 			l.mu.Lock()
 			defer l.mu.Unlock()
 			state.active--
 			l.globalLive--
+			if usageKnown && state.tokenDay == reservedDay {
+				if actualTokens < 0 {
+					actualTokens = 0
+				}
+				state.usedTokens += actualTokens - estimatedTokens
+				if state.usedTokens < 0 {
+					state.usedTokens = 0
+				}
+			}
 		})
 	}
-	return true, "", 0, release
+	return true, "", 0, finish
+}
+
+func dayKey(now time.Time) string { return now.Format("2006-01-02") }
+
+func (l *Limiter) stateFor(ip string, now time.Time) *ipState {
+	key := limitKey(ip)
+	state := l.perIP[key]
+	if state == nil {
+		state = &ipState{}
+		l.perIP[key] = state
+	}
+	if state.tokenDay != dayKey(now) {
+		state.tokenDay = dayKey(now)
+		state.usedTokens = 0
+	}
+	return state
+}
+
+func (l *Limiter) pruneAttempts(state *ipState, now time.Time) {
+	cutHour := now.Add(-time.Hour)
+	kept := state.attempts[:0]
+	for _, t := range state.attempts {
+		if t.After(cutHour) {
+			kept = append(kept, t)
+		}
+	}
+	state.attempts = kept
 }
 
 // until returns how long until oldest+window, clamped to zero. Timestamps are
@@ -179,20 +230,24 @@ func untilNextDay(now time.Time) time.Duration {
 	return 0
 }
 
-// sweep removes per-IP state that has no timestamps in the last hour and no
-// active streams. Without this, every IP that ever reached the service would
-// stay in the map forever.
+// sweep prunes expired attempts and removes per-IP state with no recent
+// attempts, active streams, or current-day token usage. Without this, every IP
+// that ever reached the service would stay in the map forever.
 func (l *Limiter) sweep(now time.Time) {
 	if now.Sub(l.lastSweep) < sweepInterval {
 		return
 	}
 	l.lastSweep = now
-	cut := now.Add(-time.Hour)
 	for key, state := range l.perIP {
+		if state.tokenDay != dayKey(now) {
+			state.tokenDay = dayKey(now)
+			state.usedTokens = 0
+		}
+		l.pruneAttempts(state, now)
 		if state.active > 0 {
 			continue
 		}
-		if len(state.times) == 0 || !state.times[len(state.times)-1].After(cut) {
+		if len(state.attempts) == 0 && state.usedTokens == 0 {
 			delete(l.perIP, key)
 		}
 	}

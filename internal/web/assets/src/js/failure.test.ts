@@ -109,6 +109,19 @@ describe("failureForStatus", () => {
     expect(failure.retryAfterMs).toBeNull();
   });
 
+  it("keeps a non-concurrency 429 message as rate-limited without a countdown", () => {
+    const failure = failureForStatus(
+      429,
+      null,
+      "Too many questions right now. Please try again later.",
+    );
+
+    expect(failure.kind).toBe("rate_limited");
+    expect(failure.message).toBe("Too many questions right now. Please try again later.");
+    expect(failure.canRetry).toBe(true);
+    expect(failure.retryAfterMs).toBeNull();
+  });
+
   it("uses the fallback busy message", () => {
     expect(failureForStatus(429, null).message).toBe(
       "Another answer is still in progress. Please wait for it to finish.",

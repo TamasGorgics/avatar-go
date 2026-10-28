@@ -23,6 +23,7 @@ func testLimits() Limits {
 	return Limits{
 		PerIPMinute:      3,
 		PerIPHourly:      20,
+		PerIPDailyTokens: 100_000,
 		GlobalMinute:     20,
 		GlobalDaily:      300,
 		PerIPConcurrent:  1,
@@ -30,19 +31,51 @@ func testLimits() Limits {
 	}
 }
 
+func beginModel(l *Limiter, ip string) (bool, string, time.Duration, func()) {
+	allowed, reason, retryAfter := l.CheckAttempt(ip)
+	if !allowed {
+		return false, reason, retryAfter, nil
+	}
+	allowed, reason, retryAfter, finish := l.ReserveModel(ip, 1)
+	if !allowed {
+		return false, reason, retryAfter, nil
+	}
+	return true, "", 0, func() { finish(0, false) }
+}
+
 func mustBegin(t *testing.T, l *Limiter, ip string) func() {
 	t.Helper()
-	allowed, reason, _, release := l.Begin(ip)
+	allowed, reason, _, release := beginModel(l, ip)
 	if !allowed {
-		t.Fatalf("Begin(%q) denied: %s", ip, reason)
+		t.Fatalf("model call for %q denied: %s", ip, reason)
 	}
 	if release == nil {
-		t.Fatalf("Begin(%q) returned nil release", ip)
+		t.Fatalf("model call for %q returned nil finish function", ip)
 	}
 	return release
 }
 
-func TestBeginAllowsAndReleases(t *testing.T) {
+func mustAttempt(t *testing.T, l *Limiter, ip string) {
+	t.Helper()
+	allowed, reason, retryAfter := l.CheckAttempt(ip)
+	if !allowed {
+		t.Fatalf("CheckAttempt(%q) denied: %s (retry after %v)", ip, reason, retryAfter)
+	}
+}
+
+func mustReserve(t *testing.T, l *Limiter, ip string, estimatedTokens int) func(int, bool) {
+	t.Helper()
+	allowed, reason, retryAfter, finish := l.ReserveModel(ip, estimatedTokens)
+	if !allowed {
+		t.Fatalf("ReserveModel(%q) denied: %s (retry after %v)", ip, reason, retryAfter)
+	}
+	if finish == nil {
+		t.Fatalf("ReserveModel(%q) returned nil finish function", ip)
+	}
+	return finish
+}
+
+func TestModelAdmissionAllowsAndFinishes(t *testing.T) {
 	clock := newTestClock()
 	l := NewWithClock(clock.Now, testLimits())
 
@@ -61,7 +94,7 @@ func TestPerIPMinute(t *testing.T) {
 	mustBegin(t, l, "192.0.2.1")()
 	mustBegin(t, l, "192.0.2.1")()
 
-	allowed, reason, _, release := l.Begin("192.0.2.1")
+	allowed, reason, _, release := beginModel(l, "192.0.2.1")
 	if allowed || release != nil || reason != reasonPerIPMinute {
 		t.Fatalf("third request = (allowed=%v, reason=%q, release_nil=%v), want denied by %s", allowed, reason, release == nil, reasonPerIPMinute)
 	}
@@ -80,7 +113,7 @@ func TestPerIPHourly(t *testing.T) {
 	mustBegin(t, l, "192.0.2.1")()
 	mustBegin(t, l, "192.0.2.1")()
 
-	allowed, reason, _, release := l.Begin("192.0.2.1")
+	allowed, reason, _, release := beginModel(l, "192.0.2.1")
 	if allowed || release != nil || reason != reasonPerIPHour {
 		t.Fatalf("third request = (allowed=%v, reason=%q, release_nil=%v), want denied by %s", allowed, reason, release == nil, reasonPerIPHour)
 	}
@@ -99,7 +132,7 @@ func TestGlobalMinute(t *testing.T) {
 	mustBegin(t, l, "192.0.2.1")()
 	mustBegin(t, l, "192.0.2.2")()
 
-	allowed, reason, _, release := l.Begin("192.0.2.3")
+	allowed, reason, _, release := beginModel(l, "192.0.2.3")
 	if allowed || release != nil || reason != reasonGlobalMinute {
 		t.Fatalf("third request = (allowed=%v, reason=%q, release_nil=%v), want denied by %s", allowed, reason, release == nil, reasonGlobalMinute)
 	}
@@ -119,13 +152,137 @@ func TestGlobalDaily(t *testing.T) {
 	mustBegin(t, l, "192.0.2.1")()
 	mustBegin(t, l, "192.0.2.2")()
 
-	allowed, reason, _, release := l.Begin("192.0.2.3")
+	allowed, reason, _, release := beginModel(l, "192.0.2.3")
 	if allowed || release != nil || reason != reasonGlobalDaily {
 		t.Fatalf("third request = (allowed=%v, reason=%q, release_nil=%v), want denied by %s", allowed, reason, release == nil, reasonGlobalDaily)
 	}
 
 	clock.Advance(24 * time.Hour)
 	mustBegin(t, l, "192.0.2.3")()
+}
+
+func TestAttemptsDoNotConsumeGlobalModelLimits(t *testing.T) {
+	clock := newTestClock()
+	limits := testLimits()
+	limits.GlobalMinute = 1
+	limits.GlobalDaily = 1
+	l := NewWithClock(clock.Now, limits)
+
+	// Simulate malformed requests: they pass the early attempt limit but never
+	// reserve a model call.
+	mustAttempt(t, l, "192.0.2.1")
+	mustAttempt(t, l, "192.0.2.1")
+
+	finish := mustReserve(t, l, "192.0.2.1", 100)
+	finish(100, true)
+
+	mustAttempt(t, l, "192.0.2.2")
+	allowed, reason, _, finish := l.ReserveModel("192.0.2.2", 100)
+	if allowed || finish != nil || reason != reasonGlobalDaily {
+		t.Fatalf("second model admission = (allowed=%v, reason=%q), want denied by %s", allowed, reason, reasonGlobalDaily)
+	}
+}
+
+func TestGlobalMinuteCountsModelCalls(t *testing.T) {
+	clock := newTestClock()
+	limits := testLimits()
+	limits.GlobalMinute = 1
+	limits.GlobalDaily = 100
+	l := NewWithClock(clock.Now, limits)
+
+	mustAttempt(t, l, "192.0.2.1")
+	mustReserve(t, l, "192.0.2.1", 100)(100, true)
+
+	clock.Advance(20 * time.Second)
+	mustAttempt(t, l, "192.0.2.2")
+	allowed, reason, retryAfter, finish := l.ReserveModel("192.0.2.2", 100)
+	if allowed || finish != nil || reason != reasonGlobalMinute {
+		t.Fatalf("second model admission = (allowed=%v, reason=%q), want denied by %s", allowed, reason, reasonGlobalMinute)
+	}
+	if want := 40 * time.Second; retryAfter != want {
+		t.Fatalf("retryAfter = %v, want %v", retryAfter, want)
+	}
+}
+
+func TestPerIPDailyTokenReservationAndSettlement(t *testing.T) {
+	clock := newTestClock()
+	limits := testLimits()
+	limits.PerIPDailyTokens = 1000
+	l := NewWithClock(clock.Now, limits)
+
+	mustAttempt(t, l, "192.0.2.1")
+	mustReserve(t, l, "192.0.2.1", 700)(250, true)
+
+	mustAttempt(t, l, "192.0.2.1")
+	mustReserve(t, l, "192.0.2.1", 750)(500, true)
+
+	mustAttempt(t, l, "192.0.2.1")
+	allowed, reason, retryAfter, finish := l.ReserveModel("192.0.2.1", 251)
+	if allowed || finish != nil || reason != reasonPerIPDailyTokens {
+		t.Fatalf("over-budget admission = (allowed=%v, reason=%q), want denied by %s", allowed, reason, reasonPerIPDailyTokens)
+	}
+	if want := 12 * time.Hour; retryAfter != want {
+		t.Fatalf("retryAfter = %v, want %v", retryAfter, want)
+	}
+
+	l.mu.Lock()
+	used := l.perIP["192.0.2.1"].usedTokens
+	l.mu.Unlock()
+	if used != 750 {
+		t.Fatalf("usedTokens = %d, want 750 after settling actual usage", used)
+	}
+}
+
+func TestPerIPDailyTokenReservationPreventsConcurrentOverbooking(t *testing.T) {
+	clock := newTestClock()
+	limits := testLimits()
+	limits.PerIPDailyTokens = 1000
+	limits.PerIPConcurrent = 2
+	l := NewWithClock(clock.Now, limits)
+
+	mustAttempt(t, l, "192.0.2.1")
+	finish := mustReserve(t, l, "192.0.2.1", 700)
+	mustAttempt(t, l, "192.0.2.1")
+	allowed, reason, _, deniedFinish := l.ReserveModel("192.0.2.1", 400)
+	if allowed || deniedFinish != nil || reason != reasonPerIPDailyTokens {
+		t.Fatalf("concurrent over-budget admission = (allowed=%v, reason=%q), want denied by %s", allowed, reason, reasonPerIPDailyTokens)
+	}
+	finish(0, false) // Missing usage conservatively keeps the reservation.
+
+	mustAttempt(t, l, "192.0.2.1")
+	allowed, reason, _, deniedFinish = l.ReserveModel("192.0.2.1", 301)
+	if allowed || deniedFinish != nil || reason != reasonPerIPDailyTokens {
+		t.Fatalf("missing-usage fallback = (allowed=%v, reason=%q), want denied by %s", allowed, reason, reasonPerIPDailyTokens)
+	}
+}
+
+func TestPerIPDailyTokenBudgetResetsAtMidnight(t *testing.T) {
+	clock := newTestClock()
+	limits := testLimits()
+	limits.PerIPDailyTokens = 500
+	l := NewWithClock(clock.Now, limits)
+
+	mustAttempt(t, l, "192.0.2.1")
+	mustReserve(t, l, "192.0.2.1", 500)(0, false)
+
+	clock.Advance(12 * time.Hour)
+	mustAttempt(t, l, "192.0.2.1")
+	mustReserve(t, l, "192.0.2.1", 500)(500, true)
+}
+
+func TestPerIPDailyTokenBudgetGroupsIPv6By64(t *testing.T) {
+	clock := newTestClock()
+	limits := testLimits()
+	limits.PerIPDailyTokens = 1000
+	l := NewWithClock(clock.Now, limits)
+
+	mustAttempt(t, l, "2001:db8::1")
+	mustReserve(t, l, "2001:db8::1", 700)(700, true)
+	mustAttempt(t, l, "2001:db8::2")
+	allowed, reason, _, finish := l.ReserveModel("2001:db8::2", 400)
+	if allowed || finish != nil || reason != reasonPerIPDailyTokens {
+		t.Fatalf("same-/64 admission = (allowed=%v, reason=%q), want denied by %s", allowed, reason, reasonPerIPDailyTokens)
+	}
 }
 
 func TestRetryAfterPerIPMinute(t *testing.T) {
@@ -140,7 +297,7 @@ func TestRetryAfterPerIPMinute(t *testing.T) {
 	mustBegin(t, l, "192.0.2.1")()
 	clock.Advance(10 * time.Second)
 
-	allowed, reason, retryAfter, release := l.Begin("192.0.2.1")
+	allowed, reason, retryAfter, release := beginModel(l, "192.0.2.1")
 	if allowed || release != nil || reason != reasonPerIPMinute {
 		t.Fatalf("third request = (allowed=%v, reason=%q), want denied by %s", allowed, reason, reasonPerIPMinute)
 	}
@@ -161,7 +318,7 @@ func TestRetryAfterPerIPHour(t *testing.T) {
 	mustBegin(t, l, "192.0.2.1")()
 	clock.Advance(10 * time.Minute)
 
-	allowed, reason, retryAfter, release := l.Begin("192.0.2.1")
+	allowed, reason, retryAfter, release := beginModel(l, "192.0.2.1")
 	if allowed || release != nil || reason != reasonPerIPHour {
 		t.Fatalf("third request = (allowed=%v, reason=%q), want denied by %s", allowed, reason, reasonPerIPHour)
 	}
@@ -182,7 +339,7 @@ func TestRetryAfterGlobalMinute(t *testing.T) {
 	mustBegin(t, l, "192.0.2.2")()
 	clock.Advance(15 * time.Second)
 
-	allowed, reason, retryAfter, release := l.Begin("192.0.2.3")
+	allowed, reason, retryAfter, release := beginModel(l, "192.0.2.3")
 	if allowed || release != nil || reason != reasonGlobalMinute {
 		t.Fatalf("third request = (allowed=%v, reason=%q), want denied by %s", allowed, reason, reasonGlobalMinute)
 	}
@@ -202,7 +359,7 @@ func TestRetryAfterGlobalDaily(t *testing.T) {
 	mustBegin(t, l, "192.0.2.1")()
 	mustBegin(t, l, "192.0.2.2")()
 
-	allowed, reason, retryAfter, release := l.Begin("192.0.2.3")
+	allowed, reason, retryAfter, release := beginModel(l, "192.0.2.3")
 	if allowed || release != nil || reason != reasonGlobalDaily {
 		t.Fatalf("third request = (allowed=%v, reason=%q), want denied by %s", allowed, reason, reasonGlobalDaily)
 	}
@@ -220,7 +377,7 @@ func TestRetryAfterZeroForConcurrency(t *testing.T) {
 
 	release := mustBegin(t, l, "192.0.2.1")
 
-	allowed, reason, retryAfter, deniedRelease := l.Begin("192.0.2.1")
+	allowed, reason, retryAfter, deniedRelease := beginModel(l, "192.0.2.1")
 	if allowed || deniedRelease != nil || reason != reasonPerIPConcurrent {
 		t.Fatalf("second request = (allowed=%v, reason=%q), want denied by %s", allowed, reason, reasonPerIPConcurrent)
 	}
@@ -240,7 +397,7 @@ func TestPerIPConcurrent(t *testing.T) {
 
 	release := mustBegin(t, l, "192.0.2.1")
 
-	allowed, reason, _, deniedRelease := l.Begin("192.0.2.1")
+	allowed, reason, _, deniedRelease := beginModel(l, "192.0.2.1")
 	if allowed || deniedRelease != nil || reason != reasonPerIPConcurrent {
 		t.Fatalf("second request = (allowed=%v, reason=%q, release_nil=%v), want denied by %s", allowed, reason, deniedRelease == nil, reasonPerIPConcurrent)
 	}
@@ -259,7 +416,7 @@ func TestGlobalConcurrent(t *testing.T) {
 
 	release := mustBegin(t, l, "192.0.2.1")
 
-	allowed, reason, _, deniedRelease := l.Begin("192.0.2.2")
+	allowed, reason, _, deniedRelease := beginModel(l, "192.0.2.2")
 	if allowed || deniedRelease != nil || reason != reasonGlobalConcurrent {
 		t.Fatalf("second request = (allowed=%v, reason=%q, release_nil=%v), want denied by %s", allowed, reason, deniedRelease == nil, reasonGlobalConcurrent)
 	}
@@ -296,7 +453,7 @@ func TestIPv6IsLimitedBy64(t *testing.T) {
 
 	mustBegin(t, l, "2001:db8::1")()
 
-	allowed, reason, _, release := l.Begin("2001:db8::2")
+	allowed, reason, _, release := beginModel(l, "2001:db8::2")
 	if allowed || release != nil || reason != reasonPerIPMinute {
 		t.Fatalf("same /64 = (allowed=%v, reason=%q, release_nil=%v), want denied by %s", allowed, reason, release == nil, reasonPerIPMinute)
 	}
@@ -329,11 +486,11 @@ func TestSweepRemovesIdleIPs(t *testing.T) {
 	l := NewWithClock(clock.Now, limits)
 
 	for _, ip := range []string{"192.0.2.1", "192.0.2.2", "192.0.2.3"} {
-		mustBegin(t, l, ip)()
+		mustAttempt(t, l, ip)
 	}
 
 	clock.Advance(2 * time.Hour)
-	mustBegin(t, l, "192.0.2.4")()
+	mustAttempt(t, l, "192.0.2.4")
 
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -350,41 +507,46 @@ func TestZeroLimitsDeny(t *testing.T) {
 	}{
 		{
 			name:   "per ip minute",
-			limits: Limits{PerIPMinute: 0, PerIPHourly: 1, GlobalMinute: 1, GlobalDaily: 1, PerIPConcurrent: 1, GlobalConcurrent: 1},
+			limits: Limits{PerIPMinute: 0, PerIPHourly: 1, PerIPDailyTokens: 1, GlobalMinute: 1, GlobalDaily: 1, PerIPConcurrent: 1, GlobalConcurrent: 1},
 			reason: reasonPerIPMinute,
 		},
 		{
 			name:   "per ip hourly",
-			limits: Limits{PerIPMinute: 1, PerIPHourly: 0, GlobalMinute: 1, GlobalDaily: 1, PerIPConcurrent: 1, GlobalConcurrent: 1},
+			limits: Limits{PerIPMinute: 1, PerIPHourly: 0, PerIPDailyTokens: 1, GlobalMinute: 1, GlobalDaily: 1, PerIPConcurrent: 1, GlobalConcurrent: 1},
 			reason: reasonPerIPHour,
 		},
 		{
 			name:   "global minute",
-			limits: Limits{PerIPMinute: 1, PerIPHourly: 1, GlobalMinute: 0, GlobalDaily: 1, PerIPConcurrent: 1, GlobalConcurrent: 1},
+			limits: Limits{PerIPMinute: 1, PerIPHourly: 1, PerIPDailyTokens: 1, GlobalMinute: 0, GlobalDaily: 1, PerIPConcurrent: 1, GlobalConcurrent: 1},
 			reason: reasonGlobalMinute,
 		},
 		{
 			name:   "global daily",
-			limits: Limits{PerIPMinute: 1, PerIPHourly: 1, GlobalMinute: 1, GlobalDaily: 0, PerIPConcurrent: 1, GlobalConcurrent: 1},
+			limits: Limits{PerIPMinute: 1, PerIPHourly: 1, PerIPDailyTokens: 1, GlobalMinute: 1, GlobalDaily: 0, PerIPConcurrent: 1, GlobalConcurrent: 1},
 			reason: reasonGlobalDaily,
 		},
 		{
 			name:   "per ip concurrent",
-			limits: Limits{PerIPMinute: 1, PerIPHourly: 1, GlobalMinute: 1, GlobalDaily: 1, PerIPConcurrent: 0, GlobalConcurrent: 1},
+			limits: Limits{PerIPMinute: 1, PerIPHourly: 1, PerIPDailyTokens: 1, GlobalMinute: 1, GlobalDaily: 1, PerIPConcurrent: 0, GlobalConcurrent: 1},
 			reason: reasonPerIPConcurrent,
 		},
 		{
 			name:   "global concurrent",
-			limits: Limits{PerIPMinute: 1, PerIPHourly: 1, GlobalMinute: 1, GlobalDaily: 1, PerIPConcurrent: 1, GlobalConcurrent: 0},
+			limits: Limits{PerIPMinute: 1, PerIPHourly: 1, PerIPDailyTokens: 1, GlobalMinute: 1, GlobalDaily: 1, PerIPConcurrent: 1, GlobalConcurrent: 0},
 			reason: reasonGlobalConcurrent,
+		},
+		{
+			name:   "per ip daily tokens",
+			limits: Limits{PerIPMinute: 1, PerIPHourly: 1, PerIPDailyTokens: 0, GlobalMinute: 1, GlobalDaily: 1, PerIPConcurrent: 1, GlobalConcurrent: 1},
+			reason: reasonPerIPDailyTokens,
 		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			l := NewWithClock(newTestClock().Now, tc.limits)
-			allowed, reason, _, release := l.Begin("192.0.2.1")
+			allowed, reason, _, release := beginModel(l, "192.0.2.1")
 			if allowed || release != nil || reason != tc.reason {
-				t.Fatalf("Begin() = (allowed=%v, reason=%q, release_nil=%v), want denied by %s", allowed, reason, release == nil, tc.reason)
+				t.Fatalf("model admission = (allowed=%v, reason=%q, finish_nil=%v), want denied by %s", allowed, reason, release == nil, tc.reason)
 			}
 		})
 	}
@@ -410,7 +572,7 @@ func TestConcurrentDailyCap(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			ok, _, _, release := l.Begin("192.0.2.1")
+			ok, _, _, release := beginModel(l, "192.0.2.1")
 			if ok {
 				allowed.Add(1)
 				release()
@@ -447,7 +609,7 @@ func TestConcurrentSlots(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			<-start
-			ok, _, _, release := l.Begin("192.0.2.1")
+			ok, _, _, release := beginModel(l, "192.0.2.1")
 			if ok {
 				acquired.Add(1)
 				releases <- release

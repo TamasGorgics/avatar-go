@@ -62,6 +62,7 @@ func run(cfg config.Config, logger *slog.Logger) error {
 	limiter := ratelimit.New(ratelimit.Limits{
 		PerIPMinute:      cfg.PerIPMinute,
 		PerIPHourly:      cfg.PerIPHourly,
+		PerIPDailyTokens: cfg.PerIPDailyTokens,
 		GlobalMinute:     cfg.GlobalMinute,
 		GlobalDaily:      cfg.DailyCap,
 		PerIPConcurrent:  cfg.PerIPConcurrent,

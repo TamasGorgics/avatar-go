@@ -83,43 +83,49 @@ func TestMessages(t *testing.T) {
 
 func TestClientStream(t *testing.T) {
 	type capturedRequest struct {
-		path      string
-		auth      string
-		model     string
-		stream    bool
-		maxTokens int
-		messages  []wireMessage
+		path         string
+		auth         string
+		model        string
+		stream       bool
+		includeUsage bool
+		maxTokens    int
+		messages     []wireMessage
 	}
 
 	reqCh := make(chan capturedRequest, 1)
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
-			Model               string        `json:"model"`
-			Messages            []wireMessage `json:"messages"`
-			Stream              bool          `json:"stream"`
-			MaxCompletionTokens int           `json:"max_completion_tokens"`
+			Model         string        `json:"model"`
+			Messages      []wireMessage `json:"messages"`
+			Stream        bool          `json:"stream"`
+			StreamOptions struct {
+				IncludeUsage bool `json:"include_usage"`
+			} `json:"stream_options"`
+			MaxCompletionTokens int `json:"max_completion_tokens"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 		reqCh <- capturedRequest{
-			path:      r.URL.Path,
-			auth:      r.Header.Get("Authorization"),
-			model:     body.Model,
-			stream:    body.Stream,
-			maxTokens: body.MaxCompletionTokens,
-			messages:  body.Messages,
+			path:         r.URL.Path,
+			auth:         r.Header.Get("Authorization"),
+			model:        body.Model,
+			stream:       body.Stream,
+			includeUsage: body.StreamOptions.IncludeUsage,
+			maxTokens:    body.MaxCompletionTokens,
+			messages:     body.Messages,
 		}
 
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
 		fl, _ := w.(http.Flusher)
 		for _, chunk := range []string{
-			`{"choices":[{"delta":{"role":"assistant"}}]}`,
+			`{"choices":[{"delta":{"role":"assistant"}}],"usage":null}`,
 			`{"choices":[{"delta":{"content":"Hello"}}]}`,
 			`{"choices":[]}`,
 			`{"choices":[{"delta":{"content":" world"}}]}`,
+			`{"choices":[],"usage":{"prompt_tokens":12,"completion_tokens":7,"total_tokens":19}}`,
 		} {
 			fmt.Fprintf(w, "data: %s\n\n", chunk)
 			if fl != nil {
@@ -159,6 +165,9 @@ func TestClientStream(t *testing.T) {
 	if got.String() != "Hello world" {
 		t.Fatalf("streamed text = %q, want %q", got.String(), "Hello world")
 	}
+	if tokens, known := stream.TokenUsage(); !known || tokens != 19 {
+		t.Errorf("TokenUsage() = (%d, %v), want (19, true)", tokens, known)
+	}
 
 	req := <-reqCh
 	if req.path != "/v1/chat/completions" {
@@ -173,6 +182,9 @@ func TestClientStream(t *testing.T) {
 	if !req.stream {
 		t.Error("stream = false, want true")
 	}
+	if !req.includeUsage {
+		t.Error("stream_options.include_usage = false, want true")
+	}
 	if req.maxTokens != 400 {
 		t.Errorf("max_completion_tokens = %d, want 400", req.maxTokens)
 	}
@@ -184,6 +196,64 @@ func TestClientStream(t *testing.T) {
 	}
 	if req.messages[1] != (wireMessage{Role: "user", Content: "hi"}) {
 		t.Errorf("user message = %+v", req.messages[1])
+	}
+}
+
+func TestClientStreamFallsBackWhenUsageOptionIsUnsupported(t *testing.T) {
+	requests := make(chan bool, 3)
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			StreamOptions struct {
+				IncludeUsage bool `json:"include_usage"`
+			} `json:"stream_options"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		requests <- body.StreamOptions.IncludeUsage
+		if body.StreamOptions.IncludeUsage {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			fmt.Fprint(w, `{"error":{"message":"Unsupported parameter: stream_options","type":"invalid_request_error","param":"stream_options","code":"unsupported_parameter"}}`)
+			return
+		}
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\ndata: [DONE]\n\n")
+	}))
+	defer ts.Close()
+
+	c := New(Options{Profile: "PROFILE", APIKey: "key", BaseURL: ts.URL + "/v1", Model: "test-model"})
+	for i := 0; i < 2; i++ {
+		stream, err := c.Stream(context.Background(), []Message{{Role: "user", Content: "hi"}})
+		if err != nil {
+			t.Fatalf("Stream call %d: %v", i+1, err)
+		}
+		for stream.Next() {
+			_ = stream.Text()
+		}
+		if err := stream.Err(); err != nil {
+			t.Fatalf("stream call %d: %v", i+1, err)
+		}
+		if _, known := stream.TokenUsage(); known {
+			t.Errorf("stream call %d unexpectedly reported usage", i+1)
+		}
+		_ = stream.Close()
+	}
+
+	got := []bool{<-requests, <-requests, <-requests}
+	want := []bool{true, false, false}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("include_usage requests = %v, want %v", got, want)
+	}
+}
+
+func TestEstimateTokenReservation(t *testing.T) {
+	c := &Client{system: "0123456789"}
+	got := c.EstimateTokenReservation([]Message{{Role: "user", Content: "hi"}})
+	if want := 420; got != want {
+		t.Fatalf("EstimateTokenReservation() = %d, want %d", got, want)
 	}
 }
 

@@ -93,6 +93,15 @@ export function failureForStatus(
         retryAfterMs,
       };
     }
+    if (message && !message.startsWith("Another answer is still in progress")) {
+      return {
+        kind: "rate_limited",
+        message,
+        canRetry: true,
+        canEdit: false,
+        retryAfterMs: null,
+      };
+    }
     return {
       kind: "busy",
       message:

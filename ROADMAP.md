@@ -49,17 +49,15 @@ level coverage is tracked under the E2E item below.
 
 ### 3. Separate anti-abuse limits from model-spend limits
 
-The daily cap currently increments before validation, so cheap malformed requests can burn
-the global daily budget without ever reaching the model. The global active-stream slot is
-also held while the request body is being read.
+Landed: per-IP attempt limits remain early, while global model-call limits, token reservations,
+and concurrency are admitted only after validation. `GLOBAL_MINUTE` counts model calls.
 
-- [ ] Keep per-IP attempt limits early, before parsing, as they are today.
-- [ ] Count global daily spend and upstream concurrency only after validation and just
-      before calling the model.
-- [ ] Decide whether global-minute should mean “requests admitted” or “model calls.”
-      Protecting upstream capacity suggests the latter.
-- [ ] Add a per-IP daily token budget so one visitor cannot consume the whole allowance.
-- [ ] Add tests proving malformed requests cannot exhaust the model-spend budget.
+- [x] Keep per-IP attempt limits early, before parsing.
+- [x] Count global daily calls and upstream concurrency only after validation and just before
+      calling the model.
+- [x] Count `GLOBAL_MINUTE` as model calls, not raw requests.
+- [x] Add a per-IP daily token budget so one visitor cannot consume the whole allowance.
+- [x] Add tests proving malformed requests cannot exhaust the model-spend budget.
 
 ### 4. Add observability and health endpoints
 
@@ -70,8 +68,8 @@ time-to-first-token, which limit is firing, and how many tokens are being spent?
 - [ ] Add request IDs and include them in logs and error responses.
 - [ ] Add metrics for requests, `429`s by reason, upstream latency and errors, stream
       duration, and time-to-first-token.
-- [ ] Track token usage with `stream_options: {include_usage: true}`, with a fallback for
-      OpenAI-compatible servers that do not support it.
+- [ ] Add token-usage metrics and reporting. P0.3 now requests optional stream usage for
+      per-IP budgeting and falls back to estimates when an endpoint does not provide it.
 - [ ] Consider OpenTelemetry if traces become useful.
 - [ ] Remember the runtime image is distroless: health checks need an HTTP probe from the
       orchestrator or a tiny separate healthcheck binary.

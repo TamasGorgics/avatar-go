@@ -13,6 +13,7 @@ type Config struct {
 	DailyCap         int
 	PerIPHourly      int
 	PerIPMinute      int
+	PerIPDailyTokens int
 	GlobalMinute     int
 	PerIPConcurrent  int
 	GlobalConcurrent int
@@ -30,6 +31,7 @@ func Load() Config {
 		DailyCap:         envInt("DAILY_CAP", 300),
 		PerIPHourly:      envInt("PER_IP_HOURLY", 20),
 		PerIPMinute:      envInt("PER_IP_MINUTE", 3),
+		PerIPDailyTokens: envInt("PER_IP_DAILY_TOKENS", 20_000),
 		GlobalMinute:     envInt("GLOBAL_MINUTE", 20),
 		PerIPConcurrent:  envInt("PER_IP_CONCURRENT", 1),
 		GlobalConcurrent: envInt("GLOBAL_CONCURRENT", 4),

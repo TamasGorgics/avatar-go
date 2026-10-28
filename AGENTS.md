@@ -63,13 +63,15 @@ those seams. `ratelimit.NewWithClock` supports time-dependent tests without slee
 Tests sit beside the code; shared web fakes are in `internal/web/helpers_test.go`.
 `main_test.go` covers graceful drain/timeout and re-execs the test binary with
 `AVATAR_GO_MAIN_TEST=1` to exercise `main`; that signal test is skipped on Windows.
-`internal/twin` tests the SDK against an `httptest` SSE server, so no API key or network is
+`internal/twin` tests the SDK against an `httptest` SSE server, including optional usage
+chunks and fallback for endpoints that reject `stream_options`, so no API key or network is
 needed. `internal/logging` tests JSON/text formats, levels, color, and grouped attrs;
 `internal/web` checks the access-log fields and severity, page rendering, embedded assets,
 security headers, the single theme bootstrap inline script, and the absence of inline CSS.
 Its chat tests cover JSON/origin enforcement, body overflow, UTF-8-safe truncation,
-injection rejection, X-Forwarded-For handling, and limiter release.
-`internal/ratelimit` tests each window, concurrency caps, idempotent release, IPv6 `/64`
+injection rejection, X-Forwarded-For handling, that invalid requests do not reserve model
+budgets, and limiter release. `internal/ratelimit` tests attempt versus model-call windows,
+daily token reservation and settlement, concurrency caps, idempotent release, IPv6 `/64`
 keys, and idle pruning against an injected clock. `internal/config` tests both environment
 parsing and `.env` syntax; the `main` subprocess test proves `.env` is loaded at startup by
 running from a temporary directory.
@@ -123,8 +125,9 @@ Config is then read once by `config.Load`:
 | `LLM_MODEL` | `gpt-4o-mini` | Any OpenAI-compatible model |
 | `PER_IP_MINUTE` | `3` | Requests per client IP per rolling minute |
 | `PER_IP_HOURLY` | `20` | Requests per client IP per rolling hour |
-| `GLOBAL_MINUTE` | `20` | Requests across all clients per rolling minute |
-| `DAILY_CAP` | `300` | Requests across all clients per calendar day |
+| `PER_IP_DAILY_TOKENS` | `20000` | Estimated model tokens per client IP per calendar day |
+| `GLOBAL_MINUTE` | `20` | Validated model calls admitted across all clients per rolling minute |
+| `DAILY_CAP` | `300` | Validated model calls admitted across all clients per calendar day |
 | `PER_IP_CONCURRENT` | `1` | Active chat streams per client IP |
 | `GLOBAL_CONCURRENT` | `4` | Active chat streams across all clients |
 | `TRUST_PROXY` | unset | Set to `1` only behind one trusted proxy (e.g. Caddy); enables rightmost `X-Forwarded-For` |
@@ -158,9 +161,17 @@ logger.
   intentionally dropping that compatibility.
 - Keep SDK types inside `internal/twin`; `internal/web` should only see `twin.Message`,
   `twin.Chatter`, and `twin.Stream`.
-- The SDK handles upstream SSE framing; the HTTP layer only forwards `Stream.Text()`.
+- The SDK handles upstream SSE framing; the HTTP layer forwards only `Stream.Text()` to
+  clients and reads optional `Stream.TokenUsage()` for budget settlement.
 - SDK retries default to 2; the 60s context in `internal/web/chat.go` covers retries and
   the full stream.
+- `twin.Stream` exposes optional total-token usage without leaking SDK types. The client
+  requests usage metadata when supported, retries without that option on an explicit
+  unsupported-parameter response, and remembers that endpoint capability for the process.
+- Per-IP token admission reserves an estimate based on the system prompt, sanitized history,
+  chat framing, and the 400-token completion maximum. Reported stream usage settles that
+  reservation; if usage is absent or the stream is interrupted, the estimate remains charged.
+  This is an approximate, in-memory spend guard, not an exact cross-replica quota.
 
 ## Behavior worth preserving
 
@@ -180,9 +191,11 @@ logger.
   phrases split across messages. This is best-effort; the real limits are no tools,
   public-profile-only context, a hardened prompt, and a 400-token completion cap.
   Assistant messages are not screened because they are model output.
-- Rate limits are checked before JSON parsing, so malformed requests still consume quota.
-  Limiter state is in-memory: counters reset on restart and are per-process, so this is a
-  spend guard, not a hard quota across replicas/redeploys.
+- Per-IP minute/hour attempt limits are checked before JSON parsing, so malformed requests
+  still consume that anti-abuse quota. Global-minute/daily model-call limits, per-IP token
+  reservations, and active-stream slots are checked only after validation, immediately before
+  the upstream call. Limiter state is in-memory and per-process, so it is not a hard quota
+  across replicas/redeploys.
 - Time-window `429`s include `Retry-After` in whole seconds, rounded up from the limiter's
   estimate. Concurrency `429`s omit it and use a distinct busy message, because the server
   cannot predict when a stream slot will free up. Keep that distinction when changing the
