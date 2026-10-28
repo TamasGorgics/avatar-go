@@ -4,16 +4,23 @@
   "private": true,
   "description": "Frontend assets for avatar-go",
   "engines": {
-    "node": ">=22"
+    "node": ">=22.12"
   },
   "scripts": {
     "css": "tailwindcss -i ./internal/web/assets/src/app.css -o ./internal/web/assets/app.css --minify",
     "css:watch": "tailwindcss -i ./internal/web/assets/src/app.css -o ./internal/web/assets/app.css --watch",
-    "check:js": "node --check ./internal/web/assets/app.js",
-    "assets": "npm run css && npm run check:js"
+    "check:js": "tsc -p tsconfig.json && tsc -p tsconfig.test.json",
+    "build:js": "esbuild internal/web/assets/src/js/main.ts --bundle --format=iife --platform=browser --target=es2022 --minify --outfile=internal/web/assets/app.js",
+    "watch:js": "esbuild internal/web/assets/src/js/main.ts --bundle --format=iife --platform=browser --target=es2022 --watch --outfile=internal/web/assets/app.js",
+    "test:js": "vitest run",
+    "assets": "npm run check:js && npm run css && npm run build:js"
   },
   "devDependencies": {
     "@tailwindcss/cli": "4.3.3",
-    "tailwindcss": "4.3.3"
+    "@types/node": "22.20.5",
+    "esbuild": "0.28.2",
+    "tailwindcss": "4.3.3",
+    "typescript": "7.0.2",
+    "vitest": "5.0.5"
   }
 }

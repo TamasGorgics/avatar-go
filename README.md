@@ -7,7 +7,7 @@ A small Go service that serves a chat page and streams answers from an OpenAI-co
 
 ## Development
 
-Requires Go 1.27.1+ and Node 22+ (Node is only needed for frontend asset changes).
+Requires Go 1.27.1+ and Node 22.12+ (Node is only needed for frontend asset changes and JavaScript tests).
 
 ```sh
 cp .env.example .env
@@ -19,11 +19,13 @@ The server listens on `:8080` by default. See `.env.example` for the other setti
 
 ## Frontend
 
-The page is built with [Templ](https://templ.guide/) and [Tailwind CSS](https://tailwindcss.com/).
+The page is built with [Templ](https://templ.guide/), [Tailwind CSS](https://tailwindcss.com/),
+and TypeScript bundled with esbuild.
 Generated files are committed so normal Go builds do not need Node:
 
 - `internal/web/page_templ.go` is generated from `internal/web/page.templ`.
 - `internal/web/assets/app.css` is generated from `internal/web/assets/src/app.css`.
+- `internal/web/assets/app.js` is generated from `internal/web/assets/src/js/main.ts`.
 
 Install frontend dependencies once:
 
@@ -31,12 +33,13 @@ Install frontend dependencies once:
 npm ci
 ```
 
-After changing the page markup or styles:
+After changing the page markup, styles, or behavior:
 
 ```sh
 make assets
 make fmt
 ```
 
-`make verify-assets` regenerates both files and fails if the committed output is stale.
-`make check` still runs vet, tests, and a build; use `make race` when touching concurrency.
+`make verify-assets` regenerates all three files and fails if the committed output is stale.
+`npm run test:js` runs the TypeScript stream tests. `make check` still runs vet, tests, and
+a build; use `make race` when touching concurrency.

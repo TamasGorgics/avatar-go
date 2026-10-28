@@ -37,6 +37,9 @@ jobs:
       - name: Verify generated frontend assets
         run: make verify-assets
 
+      - name: Test frontend
+        run: npm run test:js
+
       - name: Check formatting
         run: |
           files="$(gofmt -l .)"

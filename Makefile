@@ -3,7 +3,7 @@ NPM ?= npm
 BINARY ?= avatar
 TEMPL ?= $(GO) tool templ
 
-.PHONY: all build run generate css assets verify-assets test race vet fmt check clean
+.PHONY: all build run generate css assets verify-assets test test-js race vet fmt check clean
 
 all: build
 
@@ -23,17 +23,20 @@ assets: generate
 	$(NPM) run assets
 
 verify-assets: assets
-	@for f in internal/web/page_templ.go internal/web/assets/app.css; do \
+	@for f in internal/web/page_templ.go internal/web/assets/app.css internal/web/assets/app.js; do \
 		if ! git ls-files --error-unmatch "$$f" >/dev/null 2>&1; then \
 			echo "Generated frontend asset is not tracked: $$f"; \
 			exit 1; \
 		fi; \
 	done
-	@git diff --exit-code -- internal/web/page_templ.go internal/web/assets/app.css || \
+	@git diff --exit-code -- internal/web/page_templ.go internal/web/assets/app.css internal/web/assets/app.js || \
 		(echo "Generated frontend assets are stale. Run 'make assets' and commit the results."; exit 1)
 
 test:
 	$(GO) test ./...
+
+test-js:
+	$(NPM) run test:js
 
 race:
 	$(GO) test -race ./...

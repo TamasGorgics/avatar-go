@@ -16,11 +16,12 @@ to `main` and pull requests; there is no other CI.
 - `internal/twin` — system prompt, SDK client, and `Chatter`/`Stream` interfaces.
 - `internal/web` — routes, chat handler/sanitization, access logs, and the Templ page.
   - `page.templ` is the page source; `page_templ.go` is generated and committed.
-  - `assets/src/app.css` is the Tailwind source; `assets/app.css` is generated and
-    committed. `assets/app.js` is handwritten and embedded with the CSS in `assets.go`.
-  - `page_templ.go` and `assets/app.css` must not be edited by hand.
-  - The page uses vanilla JS because `/chat` returns a plain-text stream; htmx and Alpine
-    are intentionally absent.
+  - `assets/src/app.css` is the Tailwind source; `assets/src/js/*.ts` is the TypeScript
+    source. `assets/app.css` and `assets/app.js` are generated, committed, and embedded
+    with the favicon in `assets.go`.
+  - `page_templ.go`, `assets/app.css`, and `assets/app.js` must not be edited by hand.
+  - The page uses no UI framework because `/chat` returns a plain-text stream; htmx and
+    Alpine are intentionally absent. TypeScript is bundled with esbuild.
 
 `web.Limiter` and `twin.Chatter` exist so the HTTP layer can be tested with fakes; keep
 those seams. `ratelimit.NewWithClock` supports time-dependent tests without sleeping.
@@ -30,17 +31,18 @@ those seams. `ratelimit.NewWithClock` supports time-dependent tests without slee
 - Run: `cp .env.example .env` (fill in the API key), then `make run` (listens on `:8080`
   by default)
 - Build: `make build` (writes `./avatar`; override with `make BINARY=other build`)
-- Test: `make test`; `make race` when touching concurrency.
+- Test: `make test`; `make race` when touching concurrency; `make test-js` for the
+  TypeScript stream tests.
 - Check: `make check` runs vet, tests, and a build.
 - Focused test: `go test ./internal/web -run TestChatSuccess`
-- Frontend setup: `npm ci` once, then `make assets` after editing `.templ` or CSS files.
-  `make generate` runs Templ only; `make css` runs Tailwind only.
-- `make verify-assets` regenerates Templ and Tailwind output and fails if the committed
-  files differ. CI runs this.
+- Frontend setup: `npm ci` once, then `make assets` after editing `.templ`, CSS, or
+  TypeScript files. `make generate` runs Templ only; `make css` runs Tailwind only.
+- `make verify-assets` regenerates Templ, Tailwind, and the JavaScript bundle and fails if
+  the committed files differ. CI runs this.
 - `make fmt` runs `go fmt ./...` and `go tool templ fmt ./internal/web`; `make clean`
   removes the built binary.
 - Requires Go 1.27.1 per `go.mod`; SDK v3 itself needs Go 1.26+. Frontend tooling needs
-  Node 22+ and npm, but normal `go build`/`go test` use the committed generated files.
+  Node 22.12+ and npm, but normal `go build`/`go test` use the committed generated files.
 - SDK import path is versioned: `github.com/openai/openai-go/v3` (not `.../openai-go`).
 
 ## Tests
@@ -53,15 +55,17 @@ needed. `internal/logging` tests JSON/text formats, levels, color, and grouped a
 `internal/web` checks the access-log fields and severity, page rendering, embedded assets,
 and the absence of inline page CSS/JS. `internal/config` tests both environment parsing and
 `.env` syntax; the `main` subprocess test proves `.env` is loaded at startup by running
-from a temporary directory.
+from a temporary directory. `internal/web/assets/src/js/stream.test.ts` uses Vitest and an
+injected clock to cover stream pacing, drain, cancellation, and reduced motion; run it
+with `make test-js`.
 
 ## CI
 
 `.github/workflows/ci.yml` runs on pushes to `main` and pull requests. It uses the Go
-version from `go.mod`, installs Node dependencies with `npm ci`, regenerates Templ and
-Tailwind output with `make verify-assets`, then checks formatting, runs `go vet ./...`,
-`go test ./...` with a coverage profile, `go test -race ./...`, and
-`go build -o /dev/null .`.
+version from `go.mod`, installs Node dependencies with `npm ci`, regenerates Templ,
+Tailwind, and JavaScript output with `make verify-assets`, runs `npm run test:js`, then
+checks formatting, runs `go vet ./...`, `go test ./...` with a coverage profile,
+`go test -race ./...`, and `go build -o /dev/null .`.
 
 On pushes to `main`, CI also writes the total coverage to a shields.io endpoint JSON and
 publishes it to the dedicated `badges` branch. The README coverage badge reads
@@ -144,6 +148,6 @@ never logged. `http.Server.ErrorLog` is routed through the same logger.
   streams can finish. Do not replace it with a bare `http.ListenAndServe`/`log.Fatal`.
 - `max_completion_tokens` is intentional (newer OpenAI models reject `max_tokens`).
 - Page markup is in `internal/web/page.templ`; page behavior is in
-  `internal/web/assets/app.js`; styles are in `internal/web/assets/src/app.css`. Regenerate
-  committed output with `make assets` after changing either source. The system prompt is in
+  `internal/web/assets/src/js/`; styles are in `internal/web/assets/src/app.css`. Regenerate
+  committed output with `make assets` after changing any source. The system prompt is in
   `internal/twin/prompt.go`.
