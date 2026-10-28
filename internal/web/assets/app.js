@@ -2,6 +2,10 @@
   "use strict";
 
   const MAX_LENGTH = 500;
+  const STREAM_BASE_CPS = 70;
+  const STREAM_LIVE_MAX_CPS = 600;
+  const STREAM_DRAIN_SECONDS = 1.4;
+  const STREAM_MAX_CPS = 3000;
 
   const log = document.getElementById("chat-log");
   const empty = document.getElementById("chat-empty");
@@ -21,6 +25,19 @@
   const history = [];
   let busy = false;
 
+  const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+  const graphemeSegmenter =
+    typeof Intl !== "undefined" && typeof Intl.Segmenter === "function"
+      ? new Intl.Segmenter(undefined, { granularity: "grapheme" })
+      : null;
+
+  const splitGraphemes = (text) => {
+    if (graphemeSegmenter) {
+      return Array.from(graphemeSegmenter.segment(text), (part) => part.segment);
+    }
+    return Array.from(text);
+  };
+
   const updateCount = () => {
     if (count) {
       count.textContent = `${input.value.length} / ${MAX_LENGTH}`;
@@ -34,12 +51,127 @@
   };
 
   const scrollToEnd = (behavior) => {
-    const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
     if (behavior === "smooth" && !reduceMotion && typeof log.scrollTo === "function") {
       log.scrollTo({ top: log.scrollHeight, behavior: "smooth" });
       return;
     }
     log.scrollTop = log.scrollHeight;
+  };
+
+  // Network chunks arrive unevenly. Queue graphemes and reveal them at a steady
+  // pace, speeding up as the backlog grows so the answer still catches up.
+  const createTextStream = (node) => {
+    const pending = [];
+    let cursor = 0;
+    let rendered = "";
+    let frame = null;
+    let lastFrame = 0;
+    let carry = 0;
+    let drainCps = STREAM_BASE_CPS;
+    let ended = false;
+    let resolveDrained;
+
+    const drained = new Promise((resolve) => {
+      resolveDrained = resolve;
+    });
+
+    const paint = () => {
+      if (node) {
+        node.textContent = rendered;
+      }
+      scrollToEnd("auto");
+    };
+
+    const resolveIfDrained = () => {
+      if (ended && cursor >= pending.length) {
+        resolveDrained();
+      }
+    };
+
+    const step = (now) => {
+      frame = null;
+      const backlog = pending.length - cursor;
+      if (backlog === 0) {
+        resolveIfDrained();
+        return;
+      }
+
+      const elapsed = Math.min(100, Math.max(0, now - lastFrame));
+      lastFrame = now;
+
+      const charsPerSecond = Math.min(
+        ended
+          ? drainCps
+          : Math.max(STREAM_BASE_CPS, Math.min(STREAM_LIVE_MAX_CPS, backlog * 1.2)),
+        STREAM_MAX_CPS,
+      );
+
+      carry += (charsPerSecond * elapsed) / 1000;
+      const count = Math.min(backlog, Math.floor(carry));
+      if (count > 0) {
+        carry -= count;
+        rendered += pending.slice(cursor, cursor + count).join("");
+        cursor += count;
+        paint();
+      }
+
+      if (cursor >= pending.length) {
+        pending.length = 0;
+        cursor = 0;
+        carry = 0;
+        resolveIfDrained();
+        return;
+      }
+
+      frame = requestAnimationFrame(step);
+    };
+
+    const start = () => {
+      if (frame !== null || cursor >= pending.length) {
+        return;
+      }
+      lastFrame = performance.now();
+      frame = requestAnimationFrame(step);
+    };
+
+    const push = (text) => {
+      if (!text) {
+        return;
+      }
+      if (reduceMotion) {
+        rendered += text;
+        paint();
+        return;
+      }
+      for (const grapheme of splitGraphemes(text)) {
+        pending.push(grapheme);
+      }
+      start();
+    };
+
+    const end = () => {
+      ended = true;
+      const backlog = pending.length - cursor;
+      drainCps = Math.max(STREAM_BASE_CPS, backlog / STREAM_DRAIN_SECONDS);
+      if (reduceMotion || backlog === 0) {
+        resolveDrained();
+        return;
+      }
+      start();
+    };
+
+    const cancel = () => {
+      ended = true;
+      pending.length = 0;
+      cursor = 0;
+      if (frame !== null) {
+        cancelAnimationFrame(frame);
+        frame = null;
+      }
+      resolveDrained();
+    };
+
+    return { push, end, cancel, drained };
   };
 
   const setBusy = (value) => {
@@ -113,6 +245,7 @@
     const bubble = appendMessage(assistantTemplate, "");
     const textNode = bubble?.querySelector('[data-role="text"]') ?? null;
     let answer = "";
+    let stream = null;
 
     try {
       const response = await fetch("/chat", {
@@ -133,6 +266,7 @@
         throw new Error("response body is unavailable");
       }
 
+      stream = createTextStream(textNode);
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
 
@@ -141,14 +275,17 @@
         if (done) {
           break;
         }
-        answer += decoder.decode(value, { stream: true });
-        if (textNode) {
-          textNode.textContent = answer;
-        }
-        scrollToEnd("auto");
+        const text = decoder.decode(value, { stream: true });
+        answer += text;
+        stream.push(text);
       }
 
-      answer += decoder.decode();
+      const tail = decoder.decode();
+      answer += tail;
+      stream.push(tail);
+      stream.end();
+      await stream.drained;
+
       if (textNode) {
         textNode.textContent = answer;
       }
@@ -165,6 +302,7 @@
         setStatus("The twin did not return an answer.");
       }
     } catch (error) {
+      stream?.cancel();
       console.error("chat request failed", error);
       failMessage(bubble, "Something went wrong. Please try again.");
       history.pop();
