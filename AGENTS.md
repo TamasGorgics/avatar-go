@@ -21,7 +21,9 @@ to `main` and pull requests; there is no other CI.
     with the favicon in `assets.go`.
   - `page_templ.go`, `assets/app.css`, and `assets/app.js` must not be edited by hand.
   - The page uses no UI framework because `/chat` returns a plain-text stream; htmx and
-    Alpine are intentionally absent. TypeScript is bundled with esbuild.
+    Alpine are intentionally absent. TypeScript is bundled with esbuild. The light/dark
+    switch lives in `assets/src/js/theme.ts`; colors are semantic tokens in
+    `assets/src/app.css`.
 - `Dockerfile`, `.dockerignore`, and `compose.yaml` — multi-stage image and local Compose
   service. The image build only needs Go because generated frontend assets are committed.
 
@@ -34,7 +36,7 @@ those seams. `ratelimit.NewWithClock` supports time-dependent tests without slee
   by default)
 - Build: `make build` (writes `./avatar`; override with `make BINARY=other build`)
 - Test: `make test`; `make race` when touching concurrency; `make test-js` for the
-  TypeScript stream tests.
+  TypeScript stream and theme tests.
 - Check: `make check` runs vet, tests, and a build.
 - Focused test: `go test ./internal/web -run TestChatSuccess`
 - Frontend setup: `npm ci` once, then `make assets` after editing `.templ`, CSS, or
@@ -57,11 +59,12 @@ Tests sit beside the code; shared web fakes are in `internal/web/helpers_test.go
 `internal/twin` tests the SDK against an `httptest` SSE server, so no API key or network is
 needed. `internal/logging` tests JSON/text formats, levels, color, and grouped attrs;
 `internal/web` checks the access-log fields and severity, page rendering, embedded assets,
-and the absence of inline page CSS/JS. `internal/config` tests both environment parsing and
-`.env` syntax; the `main` subprocess test proves `.env` is loaded at startup by running
-from a temporary directory. `internal/web/assets/src/js/stream.test.ts` uses Vitest and an
-injected clock to cover stream pacing, drain, cancellation, and reduced motion; run it
-with `make test-js`.
+the single theme bootstrap inline script, and the absence of inline CSS. `internal/config`
+tests both environment parsing and `.env` syntax; the `main` subprocess test proves `.env`
+is loaded at startup by running from a temporary directory.
+`internal/web/assets/src/js/stream.test.ts` uses Vitest and an injected clock to cover
+stream pacing, drain, cancellation, and reduced motion; `theme.test.ts` covers stored and
+system theme resolution. Run both with `make test-js`.
 
 ## CI
 
@@ -151,6 +154,10 @@ never logged. `http.Server.ErrorLog` is routed through the same logger.
 - `main.go` handles SIGINT/SIGTERM with `http.Server.Shutdown` and a 10s drain, so in-flight
   streams can finish. Do not replace it with a bare `http.ListenAndServe`/`log.Fatal`.
 - `max_completion_tokens` is intentional (newer OpenAI models reject `max_tokens`).
+- The page follows the OS light/dark preference until the header switch stores an explicit
+  `light` or `dark` choice in `localStorage`. The tiny inline bootstrap in `page.templ` is
+  the only inline script and must stay before the stylesheet so the theme is applied
+  without a flash. Colors are semantic tokens in `app.css`, not `dark:` utilities.
 - Page markup is in `internal/web/page.templ`; page behavior is in
   `internal/web/assets/src/js/`; styles are in `internal/web/assets/src/app.css`. Regenerate
   committed output with `make assets` after changing any source. The system prompt is in

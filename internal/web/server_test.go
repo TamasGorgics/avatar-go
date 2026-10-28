@@ -66,6 +66,10 @@ func TestPage(t *testing.T) {
 		`<link rel="icon" type="image/svg+xml" href="/assets/favicon.svg">`,
 		`<link rel="stylesheet" href="/assets/app.css">`,
 		`<script src="/assets/app.js" defer></script>`,
+		`id="theme-toggle"`,
+		`role="switch"`,
+		`aria-checked="false"`,
+		`aria-label="Dark mode"`,
 		`id="chat-log"`,
 		`id="chat-form"`,
 		`id="chat-input"`,
@@ -85,8 +89,13 @@ func TestPage(t *testing.T) {
 	if strings.Contains(body, "<style") {
 		t.Error("page body contains an inline style block")
 	}
-	if strings.Contains(body, "<script>") {
-		t.Error("page body contains an inline script block")
+	if got := strings.Count(body, "<script>"); got != 1 {
+		t.Errorf("inline script count = %d, want 1 (theme bootstrap)", got)
+	}
+	bootstrap := strings.Index(body, "prefers-color-scheme")
+	stylesheet := strings.Index(body, `<link rel="stylesheet" href="/assets/app.css">`)
+	if bootstrap == -1 || stylesheet == -1 || bootstrap > stylesheet {
+		t.Error("theme bootstrap must run before the stylesheet")
 	}
 }
 
@@ -113,7 +122,7 @@ func TestAssets(t *testing.T) {
 		contentType string
 		contains    string
 	}{
-		{name: "css", path: "/assets/app.css", contentType: "text/css", contains: "--color-fjord-700"},
+		{name: "css", path: "/assets/app.css", contentType: "text/css", contains: "--color-canvas"},
 		{name: "javascript", path: "/assets/app.js", contentType: "javascript", contains: "chat-log"},
 		{name: "favicon", path: "/assets/favicon.svg", contentType: "svg", contains: "<svg"},
 	}

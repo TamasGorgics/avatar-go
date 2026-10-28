@@ -1,7 +1,10 @@
 import { createChat } from "./chat";
 import { getChatElements, updateCount } from "./dom";
+import { setupTheme } from "./theme";
 
 const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+
+setupTheme();
 
 const elements = getChatElements();
 if (elements) {

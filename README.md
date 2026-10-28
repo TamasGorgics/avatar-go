@@ -41,8 +41,12 @@ make fmt
 ```
 
 `make verify-assets` regenerates all three files and fails if the committed output is stale.
-`npm run test:js` runs the TypeScript stream tests. `make check` still runs vet, tests, and
-a build; use `make race` when touching concurrency.
+`npm run test:js` runs the TypeScript stream and theme tests. `make check` still runs vet,
+tests, and a build; use `make race` when touching concurrency.
+
+The page follows the OS light/dark preference on first visit. The header switch stores an
+explicit choice in `localStorage`, updates the browser theme color, and is applied before
+first paint by a small bootstrap script in the page head.
 
 ## Docker
 
