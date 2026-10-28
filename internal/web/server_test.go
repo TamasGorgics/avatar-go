@@ -62,7 +62,7 @@ func TestPage(t *testing.T) {
 	body := rec.Body.String()
 	for _, want := range []string{
 		"<!doctype html>",
-		"<title>Ask my digital twin</title>",
+		"<title>Tamas’ Digital Twin</title>",
 		`<link rel="icon" type="image/svg+xml" href="/assets/favicon.svg">`,
 		`<link rel="stylesheet" href="/assets/app.css">`,
 		`<script src="/assets/app.js" defer></script>`,
@@ -76,6 +76,10 @@ func TestPage(t *testing.T) {
 		`id="chat-form"`,
 		`id="chat-input"`,
 		`id="chat-clear"`,
+		`I’m Tamas’ digital twin`,
+		`Ask me about my work`,
+		`Ask about my work`,
+		`Projects, experience, and how I work.`,
 		`data-role="actions"`,
 		`data-role="note"`,
 		`data-action="stop"`,
@@ -96,6 +100,17 @@ func TestPage(t *testing.T) {
 	}
 	if strings.Contains(body, "Built with Go, Templ, and Tailwind CSS.") {
 		t.Error("page body still contains the old footer credit")
+	}
+	for _, stale := range []string{
+		"Digital twin</p><h1",
+		"Ask my digital twin",
+		"Grounded in my notes",
+		"A conversation, not a search box",
+		"Answers come only from my CV and notes.",
+	} {
+		if strings.Contains(body, stale) {
+			t.Errorf("page body still contains old copy %q", stale)
+		}
 	}
 	if strings.Contains(body, "<style") {
 		t.Error("page body contains an inline style block")

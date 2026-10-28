@@ -21,8 +21,8 @@ request hardening, prompt-injection screening, CSP/security headers, and server 
 
 ### 1. Fill and structure `about.md`
 
-The page says “Grounded in my notes,” but the profile is still the literal text `TODO`.
-This is the single biggest gap: without it the twin has nothing to answer from.
+The twin's answers depend on `about.md`, which is still the literal text `TODO`. This is
+the single biggest gap: without it the twin has nothing to answer from.
 
 - [ ] Write the profile: summary, timeline, projects, skills, working style, FAQ, contact
       links, and a “last updated” date.

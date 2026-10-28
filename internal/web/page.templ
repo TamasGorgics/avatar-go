@@ -28,7 +28,7 @@ templ Page() {
 				})();
 			</script>
 			<link rel="icon" type="image/svg+xml" href="/assets/favicon.svg"/>
-			<title>Ask my digital twin</title>
+			<title>Tamas’ Digital Twin</title>
 			<link rel="stylesheet" href="/assets/app.css"/>
 		</head>
 		<body class="h-dvh overflow-hidden bg-canvas font-sans text-ink antialiased">
@@ -52,15 +52,11 @@ templ siteHeader() {
 		<div class="flex items-center gap-3">
 			@portrait("size-10 p-0.5", "")
 			<div>
-				<p class="text-[0.68rem] font-semibold uppercase tracking-[0.2em] text-pine">Digital twin</p>
-				<h1 class="font-display text-xl leading-tight text-ink sm:text-2xl">Ask my digital twin</h1>
+				<p class="text-[0.68rem] font-semibold uppercase tracking-[0.2em] text-pine">I’m Tamas’ digital twin</p>
+				<h1 class="font-display text-xl leading-tight text-ink sm:text-2xl">Ask me about my work</h1>
 			</div>
 		</div>
 		<div class="flex items-center gap-2">
-			<span class="hidden items-center gap-2 rounded-full border border-line bg-surface/60 px-3 py-1 text-xs font-medium text-ink-muted sm:inline-flex">
-				<span class="size-1.5 rounded-full bg-pine"></span>
-				Grounded in my notes
-			</span>
 			@themeToggle()
 		</div>
 	</header>
@@ -85,8 +81,8 @@ templ chatPanel() {
 	<section class="flex min-h-0 flex-1 flex-col overflow-hidden rounded-3xl border border-line bg-surface/75 shadow-sm ring-1 ring-halo backdrop-blur-sm" aria-labelledby="chat-heading">
 		<div class="flex items-start justify-between gap-4 border-b border-line/80 bg-surface-soft/60 px-5 py-4 sm:px-7">
 			<div>
-				<h2 id="chat-heading" class="font-display text-lg leading-snug text-ink">A conversation, not a search box</h2>
-				<p class="mt-1 max-w-xl text-sm leading-6 text-ink-muted">Answers come only from my CV and notes. If something is not there, the twin should say so.</p>
+				<h2 id="chat-heading" class="font-display text-lg leading-snug text-ink">Ask about my work</h2>
+				<p class="mt-1 max-w-xl text-sm leading-6 text-ink-muted">Projects, experience, and how I work.</p>
 			</div>
 			<button type="button" id="chat-clear" hidden aria-label="Clear conversation" class="mt-0.5 inline-flex h-8 shrink-0 cursor-pointer items-center gap-1.5 rounded-full border border-line bg-surface/70 px-3 text-xs font-medium text-ink-muted transition hover:border-accent-line hover:bg-accent-soft hover:text-accent-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-surface">
 				<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" class="size-3.5" aria-hidden="true">
