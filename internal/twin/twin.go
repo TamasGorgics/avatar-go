@@ -55,6 +55,7 @@ func (c *Client) Stream(ctx context.Context, history []Message) (Stream, error) 
 		Model:               c.model,
 		Messages:            c.messages(history),
 		MaxCompletionTokens: openai.Int(400), // newer OpenAI models reject max_tokens
+		ReasoningEffort:     openai.ReasoningEffortNone,
 	})
 	if err := stream.Err(); err != nil {
 		_ = stream.Close()
