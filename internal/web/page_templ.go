@@ -87,15 +87,15 @@ func siteHeader() templ.Component {
 		}
 		ctx = templ.InitializeContext(ctx)
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "<header class=\"flex shrink-0 items-center justify-between gap-4 py-8 sm:py-10\"><div class=\"flex items-center gap-3\"><span class=\"flex size-10 shrink-0 items-center justify-center rounded-2xl border border-line bg-surface-soft text-accent-text shadow-xs\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "<header class=\"flex shrink-0 items-center justify-between gap-4 py-8 sm:py-10\"><div class=\"flex items-center gap-3\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = mark("size-5").Render(ctx, templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = portrait("size-10 p-0.5", "").Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "</span><div><p class=\"text-[0.68rem] font-semibold uppercase tracking-[0.2em] text-pine\">Digital twin</p><h1 class=\"font-display text-xl leading-tight text-ink sm:text-2xl\">Ask my digital twin</h1></div></div><div class=\"flex items-center gap-2\"><span class=\"hidden items-center gap-2 rounded-full border border-line bg-surface/60 px-3 py-1 text-xs font-medium text-ink-muted sm:inline-flex\"><span class=\"size-1.5 rounded-full bg-pine\"></span> Grounded in my notes</span>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "<div><p class=\"text-[0.68rem] font-semibold uppercase tracking-[0.2em] text-pine\">Digital twin</p><h1 class=\"font-display text-xl leading-tight text-ink sm:text-2xl\">Ask my digital twin</h1></div></div><div class=\"flex items-center gap-2\"><span class=\"hidden items-center gap-2 rounded-full border border-line bg-surface/60 px-3 py-1 text-xs font-medium text-ink-muted sm:inline-flex\"><span class=\"size-1.5 rounded-full bg-pine\"></span> Grounded in my notes</span>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -186,15 +186,15 @@ func emptyState() templ.Component {
 		}
 		ctx = templ.InitializeContext(ctx)
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "<div id=\"chat-empty\" class=\"m-auto flex w-full max-w-lg flex-col items-center px-2 py-4 text-center sm:py-8\"><div class=\"mb-5 flex size-14 items-center justify-center rounded-2xl border border-line bg-surface-soft text-accent-text\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "<div id=\"chat-empty\" class=\"m-auto flex w-full max-w-lg flex-col items-center px-2 py-4 text-center sm:py-8\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = mark("size-7").Render(ctx, templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = portrait("mb-6 size-20 p-1 sm:size-24", "Portrait of Tamas Gorgics").Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "</div><p class=\"font-display text-2xl leading-tight text-ink\">What would you like to know?</p><p class=\"mt-2 max-w-md text-sm leading-6 text-ink-muted\">Ask about my work, the tools I use, or how I approach a problem. The twin will answer from my notes.</p><div class=\"mt-6 flex flex-wrap justify-center gap-2\"><button type=\"button\" data-prompt=\"What have you built with Go?\" class=\"cursor-pointer rounded-full border border-line bg-surface/70 px-3 py-1.5 text-xs font-medium text-accent-text transition hover:border-accent-line hover:bg-accent-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-surface\">What have you built with Go?</button> <button type=\"button\" data-prompt=\"What are you working on now?\" class=\"cursor-pointer rounded-full border border-line bg-surface/70 px-3 py-1.5 text-xs font-medium text-accent-text transition hover:border-accent-line hover:bg-accent-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-surface\">What are you working on now?</button> <button type=\"button\" data-prompt=\"How do you approach a new problem?\" class=\"cursor-pointer rounded-full border border-line bg-surface/70 px-3 py-1.5 text-xs font-medium text-accent-text transition hover:border-accent-line hover:bg-accent-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-surface\">How do you approach a new problem?</button></div></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "<p class=\"font-display text-2xl leading-tight text-ink\">What would you like to know?</p><p class=\"mt-2 max-w-md text-sm leading-6 text-ink-muted\">Ask about my work, the tools I use, or how I approach a problem. The twin will answer from my notes.</p><div class=\"mt-6 flex flex-wrap justify-center gap-2\"><button type=\"button\" data-prompt=\"What have you built with Go?\" class=\"cursor-pointer rounded-full border border-line bg-surface/70 px-3 py-1.5 text-xs font-medium text-accent-text transition hover:border-accent-line hover:bg-accent-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-surface\">What have you built with Go?</button> <button type=\"button\" data-prompt=\"What are you working on now?\" class=\"cursor-pointer rounded-full border border-line bg-surface/70 px-3 py-1.5 text-xs font-medium text-accent-text transition hover:border-accent-line hover:bg-accent-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-surface\">What are you working on now?</button> <button type=\"button\" data-prompt=\"How do you approach a new problem?\" class=\"cursor-pointer rounded-full border border-line bg-surface/70 px-3 py-1.5 text-xs font-medium text-accent-text transition hover:border-accent-line hover:bg-accent-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-surface\">How do you approach a new problem?</button></div></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -252,7 +252,7 @@ func siteFooter() templ.Component {
 	})
 }
 
-func mark(className string) templ.Component {
+func portrait(className string, alt string) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
@@ -273,11 +273,11 @@ func mark(className string) templ.Component {
 			templ_7745c5c3_ElementWriter := templ_7745c5c3_Buffer
 			templ_7745c5c3_Buffer := templ.GetBuffer()
 			var templ_7745c5c3_ElementScripts []templ.ComponentScript
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, "<svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.6\" class=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, "<span class=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var9 = []any{className}
+			var templ_7745c5c3_Var9 = []any{"inline-flex shrink-0 rounded-full bg-linear-to-br from-accent-soft via-surface-soft to-pine-soft ring-1 ring-line/70 shadow-sm " + className}
 			templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_ElementWriter, templ_7745c5c3_Var9...)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
@@ -291,7 +291,7 @@ func mark(className string) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "\" aria-hidden=\"true\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -305,7 +305,20 @@ func mark(className string) templ.Component {
 			}
 			templ.ReleaseBuffer(templ_7745c5c3_Buffer)
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 18, "><path d=\"M3 17.5 8.2 7l3.1 6.2L13.8 9l7.2 8.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\"></path> <path d=\"M3 20h18\" stroke-linecap=\"round\" opacity=\".45\"></path></svg>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 18, "><img src=\"/assets/portrait.jpg\" alt=\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var11 string
+		templ_7745c5c3_Var11, templ_7745c5c3_Err = templruntime.NewAttributeExpression(alt).Resolve(ctx)
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/page.templ`, Line: 143, Col: 43}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var11)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, "\" width=\"400\" height=\"400\" class=\"size-full rounded-full object-cover\"></span>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -330,7 +343,7 @@ func messageTemplates() templ.Component {
 		}
 		ctx = templ.InitializeContext(ctx)
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, "<template id=\"user-message-template\"><div data-role=\"message\" class=\"ml-auto max-w-[85%] rounded-2xl rounded-br-md bg-accent px-4 py-3 text-sm leading-6 text-on-accent shadow-sm\"><p data-role=\"text\" class=\"whitespace-pre-wrap break-words\"></p></div></template><template id=\"assistant-message-template\"><div data-role=\"message\" data-streaming=\"true\" class=\"mr-auto max-w-[88%] rounded-2xl rounded-bl-md border border-pine-soft bg-pine-soft/70 px-4 py-3 text-sm leading-6 text-ink shadow-sm data-[error=true]:border-danger-line data-[error=true]:bg-danger-soft data-[error=true]:text-danger\"><div class=\"mb-1 flex items-center gap-2 text-[0.62rem] font-semibold uppercase tracking-[0.15em] text-pine-ink\"><span class=\"size-1.5 rounded-full bg-pine\"></span> Twin</div><p data-role=\"text\" class=\"whitespace-pre-wrap break-words\"></p><span data-role=\"typing\" class=\"mt-2 flex items-center gap-1\" aria-hidden=\"true\"><span class=\"size-1.5 animate-typing rounded-full bg-pine [animation-delay:-300ms] motion-reduce:animate-none\"></span> <span class=\"size-1.5 animate-typing rounded-full bg-pine [animation-delay:-150ms] motion-reduce:animate-none\"></span> <span class=\"size-1.5 animate-typing rounded-full bg-pine motion-reduce:animate-none\"></span></span></div></template>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 20, "<template id=\"user-message-template\"><div data-role=\"message\" class=\"ml-auto max-w-[85%] rounded-2xl rounded-br-md bg-accent px-4 py-3 text-sm leading-6 text-on-accent shadow-sm\"><p data-role=\"text\" class=\"whitespace-pre-wrap break-words\"></p></div></template><template id=\"assistant-message-template\"><div data-role=\"message\" data-streaming=\"true\" class=\"mr-auto max-w-[88%] rounded-2xl rounded-bl-md border border-pine-soft bg-pine-soft/70 px-4 py-3 text-sm leading-6 text-ink shadow-sm data-[error=true]:border-danger-line data-[error=true]:bg-danger-soft data-[error=true]:text-danger\"><div class=\"mb-1 flex items-center gap-2 text-[0.62rem] font-semibold uppercase tracking-[0.15em] text-pine-ink\"><span class=\"size-1.5 rounded-full bg-pine\"></span> Twin</div><p data-role=\"text\" class=\"whitespace-pre-wrap break-words\"></p><span data-role=\"typing\" class=\"mt-2 flex items-center gap-1\" aria-hidden=\"true\"><span class=\"size-1.5 animate-typing rounded-full bg-pine [animation-delay:-300ms] motion-reduce:animate-none\"></span> <span class=\"size-1.5 animate-typing rounded-full bg-pine [animation-delay:-150ms] motion-reduce:animate-none\"></span> <span class=\"size-1.5 animate-typing rounded-full bg-pine motion-reduce:animate-none\"></span></span></div></template>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

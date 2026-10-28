@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-//go:embed assets/app.css assets/app.js assets/favicon.svg
+//go:embed assets/app.css assets/app.js assets/favicon.svg assets/portrait.jpg
 var assetsFS embed.FS
 
 func assetHandler() http.Handler {

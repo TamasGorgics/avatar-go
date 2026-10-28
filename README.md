@@ -27,6 +27,9 @@ Generated files are committed so normal Go builds do not need Node:
 - `internal/web/assets/app.css` is generated from `internal/web/assets/src/app.css`.
 - `internal/web/assets/app.js` is generated from `internal/web/assets/src/js/main.ts`.
 
+The favicon and portrait are static assets: `internal/web/assets/favicon.svg` is the TG
+monogram, and `internal/web/assets/portrait.jpg` is an optimized 400×400 headshot.
+
 Install frontend dependencies once:
 
 ```sh

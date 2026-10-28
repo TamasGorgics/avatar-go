@@ -50,9 +50,7 @@ templ Page() {
 templ siteHeader() {
 	<header class="flex shrink-0 items-center justify-between gap-4 py-8 sm:py-10">
 		<div class="flex items-center gap-3">
-			<span class="flex size-10 shrink-0 items-center justify-center rounded-2xl border border-line bg-surface-soft text-accent-text shadow-xs">
-				@mark("size-5")
-			</span>
+			@portrait("size-10 p-0.5", "")
 			<div>
 				<p class="text-[0.68rem] font-semibold uppercase tracking-[0.2em] text-pine">Digital twin</p>
 				<h1 class="font-display text-xl leading-tight text-ink sm:text-2xl">Ask my digital twin</h1>
@@ -98,9 +96,7 @@ templ chatPanel() {
 
 templ emptyState() {
 	<div id="chat-empty" class="m-auto flex w-full max-w-lg flex-col items-center px-2 py-4 text-center sm:py-8">
-		<div class="mb-5 flex size-14 items-center justify-center rounded-2xl border border-line bg-surface-soft text-accent-text">
-			@mark("size-7")
-		</div>
+		@portrait("mb-6 size-20 p-1 sm:size-24", "Portrait of Tamas Gorgics")
 		<p class="font-display text-2xl leading-tight text-ink">What would you like to know?</p>
 		<p class="mt-2 max-w-md text-sm leading-6 text-ink-muted">Ask about my work, the tools I use, or how I approach a problem. The twin will answer from my notes.</p>
 		<div class="mt-6 flex flex-wrap justify-center gap-2">
@@ -142,11 +138,10 @@ templ siteFooter() {
 	</footer>
 }
 
-templ mark(className string) {
-	<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" class={ className } aria-hidden="true">
-		<path d="M3 17.5 8.2 7l3.1 6.2L13.8 9l7.2 8.5" stroke-linecap="round" stroke-linejoin="round"></path>
-		<path d="M3 20h18" stroke-linecap="round" opacity=".45"></path>
-	</svg>
+templ portrait(className string, alt string) {
+	<span class={ "inline-flex shrink-0 rounded-full bg-linear-to-br from-accent-soft via-surface-soft to-pine-soft ring-1 ring-line/70 shadow-sm " + className }>
+		<img src="/assets/portrait.jpg" alt={ alt } width="400" height="400" class="size-full rounded-full object-cover"/>
+	</span>
 }
 
 templ messageTemplates() {

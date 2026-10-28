@@ -18,7 +18,8 @@ to `main` and pull requests; there is no other CI.
   - `page.templ` is the page source; `page_templ.go` is generated and committed.
   - `assets/src/app.css` is the Tailwind source; `assets/src/js/*.ts` is the TypeScript
     source. `assets/app.css` and `assets/app.js` are generated, committed, and embedded
-    with the favicon in `assets.go`.
+    with the favicon and portrait in `assets.go`. `assets/portrait.jpg` is an optimized
+    400×400 headshot; `assets/favicon.svg` is the TG monogram.
   - `page_templ.go`, `assets/app.css`, and `assets/app.js` must not be edited by hand.
   - The page uses no UI framework because `/chat` returns a plain-text stream; htmx and
     Alpine are intentionally absent. TypeScript is bundled with esbuild. The light/dark

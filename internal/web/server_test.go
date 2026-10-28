@@ -66,6 +66,8 @@ func TestPage(t *testing.T) {
 		`<link rel="icon" type="image/svg+xml" href="/assets/favicon.svg">`,
 		`<link rel="stylesheet" href="/assets/app.css">`,
 		`<script src="/assets/app.js" defer></script>`,
+		`src="/assets/portrait.jpg"`,
+		`alt="Portrait of Tamas Gorgics"`,
 		`id="theme-toggle"`,
 		`role="switch"`,
 		`aria-checked="false"`,
@@ -124,7 +126,8 @@ func TestAssets(t *testing.T) {
 	}{
 		{name: "css", path: "/assets/app.css", contentType: "text/css", contains: "--color-canvas"},
 		{name: "javascript", path: "/assets/app.js", contentType: "javascript", contains: "chat-log"},
-		{name: "favicon", path: "/assets/favicon.svg", contentType: "svg", contains: "<svg"},
+		{name: "favicon", path: "/assets/favicon.svg", contentType: "svg", contains: "TG"},
+		{name: "portrait", path: "/assets/portrait.jpg", contentType: "image/jpeg", contains: ""},
 	}
 
 	for _, tc := range tests {
@@ -141,7 +144,7 @@ func TestAssets(t *testing.T) {
 			if got := rec.Header().Get("Cache-Control"); got != "public, max-age=300" {
 				t.Fatalf("Cache-Control = %q, want public, max-age=300", got)
 			}
-			if body := rec.Body.String(); !strings.Contains(body, tc.contains) {
+			if body := rec.Body.String(); tc.contains != "" && !strings.Contains(body, tc.contains) {
 				t.Fatalf("asset body missing %q", tc.contains)
 			}
 		})
