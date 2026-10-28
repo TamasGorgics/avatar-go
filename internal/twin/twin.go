@@ -26,14 +26,14 @@ type Message struct {
 // Chatter is the model dependency of the HTTP layer.
 type Chatter interface {
 	Stream(ctx context.Context, history []Message) (Stream, error)
-	EstimateTokenReservation(history []Message) int
+	EstimateTokenReservation(history []Message) (promptTokens, completionTokens int)
 }
 
 // Stream yields assistant text and optional aggregate token usage.
 type Stream interface {
 	Next() bool
 	Text() string
-	TokenUsage() (tokens int, known bool)
+	TokenUsage() (promptTokens, completionTokens, totalTokens int, known bool)
 	Err() error
 	Close() error
 }
@@ -126,14 +126,13 @@ func usageOptionUnsupported(err error) bool {
 // budget. It includes the system prompt, message content, chat framing overhead,
 // and the maximum completion allowance. Provider-reported usage replaces this
 // estimate when available.
-func (c *Client) EstimateTokenReservation(history []Message) int {
+func (c *Client) EstimateTokenReservation(history []Message) (promptTokens, completionTokens int) {
 	promptBytes := len(c.system)
 	for _, message := range history {
 		promptBytes += len(message.Content)
 	}
-	inputTokens := (promptBytes + bytesPerTokenEstimate - 1) / bytesPerTokenEstimate
-	inputTokens += (len(history) + 1) * messageTokenOverhead
-	return inputTokens + maxCompletionTokens
+	promptTokens = (promptBytes+bytesPerTokenEstimate-1)/bytesPerTokenEstimate + (len(history)+1)*messageTokenOverhead
+	return promptTokens, maxCompletionTokens
 }
 
 func (c *Client) messages(history []Message) []openai.ChatCompletionMessageParamUnion {
@@ -151,9 +150,11 @@ func (c *Client) messages(history []Message) []openai.ChatCompletionMessageParam
 }
 
 type openAIStream struct {
-	stream     *ssestream.Stream[openai.ChatCompletionChunk]
-	usage      int
-	usageKnown bool
+	stream           *ssestream.Stream[openai.ChatCompletionChunk]
+	promptTokens     int
+	completionTokens int
+	totalTokens      int
+	usageKnown       bool
 }
 
 func (s *openAIStream) Next() bool {
@@ -163,14 +164,39 @@ func (s *openAIStream) Next() bool {
 
 	chunk := s.stream.Current()
 	usage := chunk.Usage
-	if usage.JSON.TotalTokens.Valid() {
-		s.usage = int(usage.TotalTokens)
+	prompt, hasPrompt := tokenCount(usage.PromptTokens, usage.JSON.PromptTokens.Valid())
+	completion, hasCompletion := tokenCount(usage.CompletionTokens, usage.JSON.CompletionTokens.Valid())
+	total, hasTotal := tokenCount(usage.TotalTokens, usage.JSON.TotalTokens.Valid())
+	if hasPrompt || hasCompletion || hasTotal {
 		s.usageKnown = true
-	} else if usage.JSON.PromptTokens.Valid() || usage.JSON.CompletionTokens.Valid() {
-		s.usage = int(usage.PromptTokens + usage.CompletionTokens)
-		s.usageKnown = true
+		if hasPrompt {
+			s.promptTokens = prompt
+		}
+		if hasCompletion {
+			s.completionTokens = completion
+		}
+		if hasTotal {
+			s.totalTokens = total
+		} else {
+			s.totalTokens = addTokenCounts(s.promptTokens, s.completionTokens)
+		}
 	}
 	return true
+}
+
+func tokenCount(value int64, present bool) (int, bool) {
+	if !present || value < 0 || uint64(value) > uint64(int(^uint(0)>>1)) {
+		return 0, false
+	}
+	return int(value), true
+}
+
+func addTokenCounts(a, b int) int {
+	maxInt := int(^uint(0) >> 1)
+	if b > maxInt-a {
+		return maxInt
+	}
+	return a + b
 }
 
 func (s *openAIStream) Text() string {
@@ -181,7 +207,9 @@ func (s *openAIStream) Text() string {
 	return chunk.Choices[0].Delta.Content
 }
 
-func (s *openAIStream) TokenUsage() (int, bool) { return s.usage, s.usageKnown }
+func (s *openAIStream) TokenUsage() (int, int, int, bool) {
+	return s.promptTokens, s.completionTokens, s.totalTokens, s.usageKnown
+}
 
 func (s *openAIStream) Err() error { return s.stream.Err() }
 

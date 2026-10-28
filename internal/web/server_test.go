@@ -25,6 +25,9 @@ func TestRoutes(t *testing.T) {
 		want   int
 	}{
 		{name: "page", method: http.MethodGet, path: "/", want: http.StatusOK},
+		{name: "liveness", method: http.MethodGet, path: "/healthz", want: http.StatusOK},
+		{name: "readiness", method: http.MethodGet, path: "/readyz", want: http.StatusOK},
+		{name: "metrics", method: http.MethodGet, path: "/metrics", want: http.StatusOK},
 		{name: "chat method", method: http.MethodGet, path: "/chat", want: http.StatusMethodNotAllowed},
 		{name: "page method", method: http.MethodPost, path: "/", want: http.StatusMethodNotAllowed},
 		{name: "asset method", method: http.MethodPost, path: "/assets/app.css", want: http.StatusMethodNotAllowed},
@@ -40,7 +43,71 @@ func TestRoutes(t *testing.T) {
 			if rec.Code != tc.want {
 				t.Fatalf("status = %d, want %d", rec.Code, tc.want)
 			}
+			if rec.Header().Get(requestIDHeader) == "" {
+				t.Error("X-Request-ID header is missing")
+			}
 		})
+	}
+}
+
+func TestHealthEndpointsAndReadiness(t *testing.T) {
+	srv := New(testConfig(), &fakeLimiter{allowed: true}, &fakeChatter{}, discardLogger())
+
+	for _, tc := range []struct {
+		path string
+		code int
+		body string
+	}{
+		{path: "/healthz", code: http.StatusOK, body: "ok\n"},
+		{path: "/readyz", code: http.StatusOK, body: "ready\n"},
+	} {
+		rec := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, tc.path, nil))
+		if rec.Code != tc.code || rec.Body.String() != tc.body {
+			t.Errorf("GET %s = (%d, %q), want (%d, %q)", tc.path, rec.Code, rec.Body.String(), tc.code, tc.body)
+		}
+		if got := rec.Header().Get("Cache-Control"); got != "no-store" {
+			t.Errorf("GET %s Cache-Control = %q, want no-store", tc.path, got)
+		}
+	}
+
+	srv.SetReady(false)
+	health := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(health, httptest.NewRequest(http.MethodGet, "/healthz", nil))
+	if health.Code != http.StatusOK {
+		t.Errorf("liveness while draining = %d, want %d", health.Code, http.StatusOK)
+	}
+	ready := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(ready, httptest.NewRequest(http.MethodGet, "/readyz", nil))
+	if ready.Code != http.StatusServiceUnavailable {
+		t.Errorf("readiness while draining = %d, want %d", ready.Code, http.StatusServiceUnavailable)
+	}
+}
+
+func TestReadinessRequiresAPIKey(t *testing.T) {
+	cfg := testConfig()
+	cfg.APIKey = ""
+	srv := New(cfg, &fakeLimiter{allowed: true}, &fakeChatter{}, discardLogger())
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/readyz", nil))
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusServiceUnavailable)
+	}
+}
+
+func TestRequestIDsAreGeneratedForErrorsAndIgnoreIncomingHeader(t *testing.T) {
+	srv := New(testConfig(), &fakeLimiter{allowed: true}, &fakeChatter{}, discardLogger())
+	req := httptest.NewRequest(http.MethodGet, "/missing", nil)
+	req.Header.Set(requestIDHeader, "visitor-controlled-id")
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusNotFound)
+	}
+	id := rec.Header().Get(requestIDHeader)
+	if id == "" || id == "visitor-controlled-id" {
+		t.Fatalf("X-Request-ID = %q, want a server-generated value", id)
 	}
 }
 
@@ -150,6 +217,9 @@ func TestSecurityHeaders(t *testing.T) {
 	}{
 		{name: "page", method: http.MethodGet, path: "/"},
 		{name: "asset", method: http.MethodGet, path: "/assets/app.css"},
+		{name: "liveness", method: http.MethodGet, path: "/healthz"},
+		{name: "readiness", method: http.MethodGet, path: "/readyz"},
+		{name: "metrics", method: http.MethodGet, path: "/metrics"},
 		{name: "chat", method: http.MethodPost, path: "/chat", body: validChatBody},
 	}
 

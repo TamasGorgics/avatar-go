@@ -64,15 +64,15 @@ and concurrency are admitted only after validation. `GLOBAL_MINUTE` counts model
 Logs are good, but there is no easy way to answer: how many answers failed, what is
 time-to-first-token, which limit is firing, and how many tokens are being spent?
 
-- [ ] Add `/healthz` (liveness) and `/readyz` (readiness).
-- [ ] Add request IDs and include them in logs and error responses.
-- [ ] Add metrics for requests, `429`s by reason, upstream latency and errors, stream
+- [x] Add `/healthz` (liveness) and `/readyz` (readiness); readiness does not probe the model
+      and turns off during graceful shutdown.
+- [x] Add server-generated request IDs to response headers and request-scoped logs.
+- [x] Add metrics for requests, `429`s by reason, upstream latency and errors, stream
       duration, and time-to-first-token.
-- [ ] Add token-usage metrics and reporting. P0.3 now requests optional stream usage for
-      per-IP budgeting and falls back to estimates when an endpoint does not provide it.
+- [x] Add token-usage metrics and reporting, distinguishing upstream usage from estimates.
 - [ ] Consider OpenTelemetry if traces become useful.
-- [ ] Remember the runtime image is distroless: health checks need an HTTP probe from the
-      orchestrator or a tiny separate healthcheck binary.
+- [x] Document HTTP probes for the distroless runtime; no in-container probe binary is
+      needed.
 
 ### 5. Add browser E2E tests and a prompt eval suite
 

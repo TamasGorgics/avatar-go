@@ -18,6 +18,10 @@ func (s *Server) logRequests(next http.Handler) http.Handler {
 		if status == 0 {
 			status = http.StatusOK
 		}
+		duration := time.Since(start)
+		if r.URL.Path != "/metrics" {
+			s.metrics.observeRequest(r.Method, r.URL.Path, status, duration)
+		}
 		level := slog.LevelInfo
 		switch {
 		case status >= 500:
@@ -27,11 +31,12 @@ func (s *Server) logRequests(next http.Handler) http.Handler {
 		}
 
 		s.log.LogAttrs(r.Context(), level, "request",
+			slog.String("request_id", requestID(r.Context())),
 			slog.String("method", r.Method),
 			slog.String("path", r.URL.Path),
 			slog.Int("status", status),
 			slog.Int("bytes", sw.bytes),
-			slog.Duration("duration", time.Since(start)),
+			slog.Duration("duration", duration),
 			slog.String("remote_ip", clientIP(r, s.cfg.TrustProxy)),
 		)
 	})

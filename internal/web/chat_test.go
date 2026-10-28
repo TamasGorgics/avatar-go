@@ -58,7 +58,13 @@ func doChatRequest(t *testing.T, srv *Server, body, contentType string, headers 
 func TestChatSuccess(t *testing.T) {
 	cfg := testConfig()
 	lim := &fakeLimiter{allowed: true}
-	stream := &fakeStream{deltas: []string{"", "Hel", "lo", ""}, tokens: 42, usageKnown: true}
+	stream := &fakeStream{
+		deltas:           []string{"", "Hel", "lo", ""},
+		promptTokens:     30,
+		completionTokens: 12,
+		tokens:           42,
+		usageKnown:       true,
+	}
 	chat := &fakeChatter{stream: stream, tokenEstimate: 123}
 	srv := New(cfg, lim, chat, discardLogger())
 
@@ -699,7 +705,7 @@ func TestWriteStreamWithoutFlusher(t *testing.T) {
 	stream := &fakeStream{deltas: []string{"", "hi"}}
 	srv := New(testConfig(), &fakeLimiter{allowed: true}, &fakeChatter{}, discardLogger())
 
-	srv.writeStream(w, stream)
+	srv.writeStream(w, httptest.NewRequest(http.MethodPost, "/chat", nil), stream, time.Now())
 
 	if got := w.body.String(); got != "hi" {
 		t.Fatalf("body = %q, want %q", got, "hi")

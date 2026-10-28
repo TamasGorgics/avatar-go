@@ -24,6 +24,10 @@ func TestRequestLog(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
 	}
+	requestID := rec.Header().Get(requestIDHeader)
+	if requestID == "" {
+		t.Fatal("X-Request-ID header is missing")
+	}
 
 	entry := findLog(t, logs.Bytes(), "request")
 	if entry["level"] != "INFO" {
@@ -34,6 +38,9 @@ func TestRequestLog(t *testing.T) {
 	}
 	if entry["path"] != "/chat" {
 		t.Errorf("path = %v, want /chat", entry["path"])
+	}
+	if entry["request_id"] != requestID {
+		t.Errorf("request_id = %v, want %q", entry["request_id"], requestID)
 	}
 	if entry["status"] != float64(http.StatusOK) {
 		t.Errorf("status = %v, want %d", entry["status"], http.StatusOK)

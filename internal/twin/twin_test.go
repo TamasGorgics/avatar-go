@@ -165,8 +165,8 @@ func TestClientStream(t *testing.T) {
 	if got.String() != "Hello world" {
 		t.Fatalf("streamed text = %q, want %q", got.String(), "Hello world")
 	}
-	if tokens, known := stream.TokenUsage(); !known || tokens != 19 {
-		t.Errorf("TokenUsage() = (%d, %v), want (19, true)", tokens, known)
+	if prompt, completion, total, known := stream.TokenUsage(); !known || prompt != 12 || completion != 7 || total != 19 {
+		t.Errorf("TokenUsage() = (%d, %d, %d, %v), want (12, 7, 19, true)", prompt, completion, total, known)
 	}
 
 	req := <-reqCh
@@ -236,7 +236,7 @@ func TestClientStreamFallsBackWhenUsageOptionIsUnsupported(t *testing.T) {
 		if err := stream.Err(); err != nil {
 			t.Fatalf("stream call %d: %v", i+1, err)
 		}
-		if _, known := stream.TokenUsage(); known {
+		if _, _, _, known := stream.TokenUsage(); known {
 			t.Errorf("stream call %d unexpectedly reported usage", i+1)
 		}
 		_ = stream.Close()
@@ -251,9 +251,9 @@ func TestClientStreamFallsBackWhenUsageOptionIsUnsupported(t *testing.T) {
 
 func TestEstimateTokenReservation(t *testing.T) {
 	c := &Client{system: "0123456789"}
-	got := c.EstimateTokenReservation([]Message{{Role: "user", Content: "hi"}})
-	if want := 420; got != want {
-		t.Fatalf("EstimateTokenReservation() = %d, want %d", got, want)
+	prompt, completion := c.EstimateTokenReservation([]Message{{Role: "user", Content: "hi"}})
+	if prompt != 20 || completion != maxCompletionTokens {
+		t.Fatalf("EstimateTokenReservation() = (%d, %d), want (20, %d)", prompt, completion, maxCompletionTokens)
 	}
 }
 

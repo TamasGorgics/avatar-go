@@ -37,7 +37,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	ip := clientIP(r, s.cfg.TrustProxy)
 	allowed, reason, retryAfter := s.lim.CheckAttempt(ip)
 	if !allowed {
-		s.writeRateLimit(w, ip, reason, retryAfter)
+		s.writeRateLimit(w, r, ip, reason, retryAfter)
 		return
 	}
 
@@ -87,55 +87,72 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if reason := screenHistory(history); reason != "" {
-		s.log.Warn("chat rejected", "ip", ip, "reason", reason)
+		s.log.Warn("chat rejected", "request_id", requestID(r.Context()), "ip", ip, "reason", reason)
 		http.Error(w, rejectedMsg, http.StatusBadRequest)
 		return
 	}
 
-	allowed, reason, retryAfter, finish := s.lim.ReserveModel(ip, s.chat.EstimateTokenReservation(history))
+	estimatedPromptTokens, estimatedCompletionTokens := s.chat.EstimateTokenReservation(history)
+	estimatedTokens := estimatedPromptTokens + estimatedCompletionTokens
+	allowed, reason, retryAfter, finish := s.lim.ReserveModel(ip, estimatedTokens)
 	if !allowed {
-		s.writeRateLimit(w, ip, reason, retryAfter)
+		s.writeRateLimit(w, r, ip, reason, retryAfter)
 		return
 	}
 
 	var stream twin.Stream
-	var actualTokens int
+	var promptTokens, completionTokens, totalTokens int
 	var usageKnown bool
-	if finish != nil {
-		defer func() {
-			if stream != nil {
-				actualTokens, usageKnown = stream.TokenUsage()
-			}
-			finish(actualTokens, usageKnown)
-		}()
-	}
+	defer func() {
+		if stream != nil {
+			promptTokens, completionTokens, totalTokens, usageKnown = stream.TokenUsage()
+		}
+		if finish != nil {
+			finish(totalTokens, usageKnown)
+		}
+		source := "estimated"
+		if usageKnown {
+			source = "reported"
+		} else {
+			promptTokens = estimatedPromptTokens
+			completionTokens = estimatedCompletionTokens
+			totalTokens = estimatedTokens
+		}
+		s.metrics.observeTokens(source, promptTokens, completionTokens, totalTokens)
+	}()
 
 	// Overall cap on the request, including the streamed body.
 	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
 	defer cancel()
 
-	s.log.Debug("chat request", "ip", ip, "messages", len(history))
+	s.log.Debug("chat request", "request_id", requestID(r.Context()), "ip", ip, "messages", len(history))
 
 	var err error
+	modelStarted := time.Now()
 	stream, err = s.chat.Stream(ctx, history)
+	s.metrics.upstreamStart.Observe(time.Since(modelStarted).Seconds())
 	if err != nil {
-		s.log.Error("upstream error", "err", err, "ip", ip)
+		s.metrics.upstreamErrors.WithLabelValues("start").Inc()
+		s.log.Error("upstream error", "request_id", requestID(r.Context()), "err", err, "ip", ip)
 		http.Error(w, unavailableMsg, http.StatusBadGateway)
 		return
 	}
 	if stream == nil {
 		err = errors.New("nil chat stream")
-		s.log.Error("upstream error", "err", err, "ip", ip)
+		s.metrics.upstreamErrors.WithLabelValues("start").Inc()
+		s.log.Error("upstream error", "request_id", requestID(r.Context()), "err", err, "ip", ip)
 		http.Error(w, unavailableMsg, http.StatusBadGateway)
 		return
 	}
 	defer func() { _ = stream.Close() }()
 
-	s.writeStream(w, stream)
+	s.writeStream(w, r, stream, modelStarted)
+	s.metrics.streamDuration.Observe(time.Since(modelStarted).Seconds())
 }
 
-func (s *Server) writeRateLimit(w http.ResponseWriter, ip, reason string, retryAfter time.Duration) {
-	s.log.Warn("rate limited", "ip", ip, "reason", reason)
+func (s *Server) writeRateLimit(w http.ResponseWriter, r *http.Request, ip, reason string, retryAfter time.Duration) {
+	s.metrics.observeRateLimit(reason)
+	s.log.Warn("rate limited", "request_id", requestID(r.Context()), "ip", ip, "reason", reason)
 	if retryAfter > 0 {
 		seconds := int((retryAfter + time.Second - 1) / time.Second)
 		w.Header().Set("Retry-After", strconv.Itoa(seconds))
@@ -197,13 +214,18 @@ func sanitize(history []chatMessage) []twin.Message {
 	return msgs
 }
 
-func (s *Server) writeStream(w http.ResponseWriter, stream twin.Stream) {
+func (s *Server) writeStream(w http.ResponseWriter, r *http.Request, stream twin.Stream, modelStarted time.Time) {
 	fl, _ := w.(http.Flusher)
 	wrote := false
+	firstToken := false
 	for stream.Next() {
 		delta := stream.Text()
 		if delta == "" {
 			continue
+		}
+		if !firstToken {
+			firstToken = true
+			s.metrics.timeToFirstToken.Observe(time.Since(modelStarted).Seconds())
 		}
 		if !wrote {
 			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
@@ -212,7 +234,7 @@ func (s *Server) writeStream(w http.ResponseWriter, stream twin.Stream) {
 			wrote = true
 		}
 		if _, err := w.Write([]byte(delta)); err != nil {
-			s.log.Debug("write response", "err", err)
+			s.log.Debug("write response", "request_id", requestID(r.Context()), "err", err)
 			return
 		}
 		if fl != nil {
@@ -220,7 +242,8 @@ func (s *Server) writeStream(w http.ResponseWriter, stream twin.Stream) {
 		}
 	}
 	if err := stream.Err(); err != nil {
-		s.log.Error("upstream stream error", "err", err)
+		s.metrics.upstreamErrors.WithLabelValues("stream").Inc()
+		s.log.Error("upstream stream error", "request_id", requestID(r.Context()), "err", err)
 		if !wrote {
 			http.Error(w, unavailableMsg, http.StatusBadGateway)
 		}

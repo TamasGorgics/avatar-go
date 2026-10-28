@@ -70,9 +70,10 @@ needed. `internal/logging` tests JSON/text formats, levels, color, and grouped a
 security headers, the single theme bootstrap inline script, and the absence of inline CSS.
 Its chat tests cover JSON/origin enforcement, body overflow, UTF-8-safe truncation,
 injection rejection, X-Forwarded-For handling, that invalid requests do not reserve model
-budgets, and limiter release. `internal/ratelimit` tests attempt versus model-call windows,
-daily token reservation and settlement, concurrency caps, idempotent release, IPv6 `/64`
-keys, and idle pruning against an injected clock. `internal/config` tests both environment
+budgets, limiter release, request IDs, health/readiness, and metrics. `internal/ratelimit`
+tests attempt versus model-call windows, daily token reservation and settlement, concurrency
+caps, idempotent release, IPv6 `/64` keys, and idle pruning against an injected clock.
+`internal/config` tests both environment
 parsing and `.env` syntax; the `main` subprocess test proves `.env` is loaded at startup by
 running from a temporary directory.
 `internal/web/assets/src/js/stream.test.ts` uses Vitest and an injected clock to cover
@@ -147,12 +148,21 @@ selects the development handler: ANSI-colored levels, a shortened source locatio
 logfmt-style metadata. Anything else (containers, systemd, pipes, CI) gets
 newline-delimited JSON. `NO_COLOR` or `TERM=dumb` disables color without changing formats.
 
-Every HTTP request logs `method`, `path`, `status`, `bytes`, `duration`, and `remote_ip`;
-4xx responses log at `WARN` and 5xx at `ERROR`. Rate-limit hits log `ip` and `reason`;
+Every HTTP request logs `method`, `path`, `status`, `bytes`, `duration`, `remote_ip`, and
+`request_id`; 4xx responses log at `WARN` and 5xx at `ERROR`. The server-generated
+`X-Request-ID` response header correlates errors with request-scoped logs. Rate-limit hits
+log `ip` and `reason`;
 injection rejections log `ip` and the rule reason, never the message content. Upstream
 failures, stream errors, page-render errors, and shutdown problems include an `err`
 attribute. API keys are never logged. `http.Server.ErrorLog` is routed through the same
 logger.
+
+`GET /healthz` is liveness only; `GET /readyz` reflects local readiness and graceful
+shutdown state without probing the model. `GET /metrics` serves aggregate Prometheus
+metrics. Keep labels bounded to normalized routes, methods, statuses, limiter reasons, and
+token-usage source; never label with IPs, request IDs, or message content. Restrict metrics
+scraping at the proxy when needed. The distroless runtime relies on an orchestrator HTTP
+probe rather than an in-container shell.
 
 ## SDK notes
 
@@ -165,9 +175,10 @@ logger.
   clients and reads optional `Stream.TokenUsage()` for budget settlement.
 - SDK retries default to 2; the 60s context in `internal/web/chat.go` covers retries and
   the full stream.
-- `twin.Stream` exposes optional total-token usage without leaking SDK types. The client
-  requests usage metadata when supported, retries without that option on an explicit
-  unsupported-parameter response, and remembers that endpoint capability for the process.
+- `twin.Stream` exposes optional prompt, completion, and total-token usage without leaking
+  SDK types. The client requests usage metadata when supported, retries without that option
+  on an explicit unsupported-parameter response, and remembers that endpoint capability for
+  the process.
 - Per-IP token admission reserves an estimate based on the system prompt, sanitized history,
   chat framing, and the 400-token completion maximum. Reported stream usage settles that
   reservation; if usage is absent or the stream is interrupted, the estimate remains charged.

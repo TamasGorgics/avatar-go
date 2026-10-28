@@ -87,17 +87,19 @@ func (f *fakeChatter) Stream(ctx context.Context, history []twin.Message) (twin.
 	return f.stream, f.err
 }
 
-func (f *fakeChatter) EstimateTokenReservation([]twin.Message) int {
-	return f.tokenEstimate
+func (f *fakeChatter) EstimateTokenReservation([]twin.Message) (int, int) {
+	return f.tokenEstimate, 0
 }
 
 type fakeStream struct {
-	deltas     []string
-	err        error
-	index      int
-	closed     bool
-	tokens     int
-	usageKnown bool
+	deltas           []string
+	err              error
+	index            int
+	closed           bool
+	promptTokens     int
+	completionTokens int
+	tokens           int
+	usageKnown       bool
 }
 
 func (s *fakeStream) Next() bool {
@@ -115,7 +117,9 @@ func (s *fakeStream) Text() string {
 	return s.deltas[s.index-1]
 }
 
-func (s *fakeStream) TokenUsage() (int, bool) { return s.tokens, s.usageKnown }
+func (s *fakeStream) TokenUsage() (int, int, int, bool) {
+	return s.promptTokens, s.completionTokens, s.tokens, s.usageKnown
+}
 
 func (s *fakeStream) Err() error {
 	return s.err

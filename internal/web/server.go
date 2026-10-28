@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"log/slog"
 	"net/http"
+	"sync/atomic"
 	"time"
 
 	"avatar-go/internal/config"
@@ -17,30 +18,60 @@ type Limiter interface {
 }
 
 type Server struct {
-	cfg  config.Config
-	lim  Limiter
-	chat twin.Chatter
-	log  *slog.Logger
+	cfg     config.Config
+	lim     Limiter
+	chat    twin.Chatter
+	log     *slog.Logger
+	metrics *appMetrics
+	ready   atomic.Bool
 }
 
 func New(cfg config.Config, lim Limiter, chat twin.Chatter, logger *slog.Logger) *Server {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Server{
-		cfg:  cfg,
-		lim:  lim,
-		chat: chat,
-		log:  logger,
+	srv := &Server{
+		cfg:     cfg,
+		lim:     lim,
+		chat:    chat,
+		log:     logger,
+		metrics: newAppMetrics(),
 	}
+	srv.ready.Store(cfg.APIKey != "")
+	return srv
 }
 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /{$}", s.handlePage)
 	mux.Handle("GET /assets/", assetHandler())
+	mux.HandleFunc("GET /healthz", s.handleHealth)
+	mux.HandleFunc("GET /readyz", s.handleReady)
+	mux.Handle("GET /metrics", s.metrics.handler())
 	mux.HandleFunc("POST /chat", s.handleChat)
-	return s.logRequests(s.securityHeaders(mux))
+	return withRequestID(s.logRequests(s.securityHeaders(mux)))
+}
+
+// SetReady controls the readiness endpoint. The server remains live while it
+// drains, but should stop receiving new traffic once shutdown starts.
+func (s *Server) SetReady(ready bool) { s.ready.Store(ready) }
+
+func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte("ok\n"))
+}
+
+func (s *Server) handleReady(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	if !s.ready.Load() {
+		http.Error(w, "not ready", http.StatusServiceUnavailable)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte("ready\n"))
 }
 
 const contentSecurityPolicy = "default-src 'self'; " +
@@ -69,7 +100,7 @@ func (s *Server) securityHeaders(next http.Handler) http.Handler {
 func (s *Server) handlePage(w http.ResponseWriter, r *http.Request) {
 	var buf bytes.Buffer
 	if err := Page().Render(r.Context(), &buf); err != nil {
-		s.log.Error("render page", "err", err)
+		s.log.Error("render page", "request_id", requestID(r.Context()), "err", err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
@@ -77,6 +108,6 @@ func (s *Server) handlePage(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-cache")
 	if _, err := buf.WriteTo(w); err != nil {
-		s.log.Error("write page", "err", err)
+		s.log.Error("write page", "request_id", requestID(r.Context()), "err", err)
 	}
 }

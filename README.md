@@ -115,6 +115,22 @@ inline theme bootstrap is why the CSP allows `'unsafe-inline'` scripts.
 There is no CAPTCHA or WAF in the default deployment. If the public site attracts
 distributed bot traffic, put it behind Cloudflare or add Turnstile.
 
+## Operations and observability
+
+`GET /healthz` is a liveness check and does not contact the model. `GET /readyz` reports
+whether the service has an API key and is accepting traffic; readiness turns off when
+graceful shutdown begins. Neither endpoint performs an upstream health probe.
+
+`GET /metrics` exposes aggregate Prometheus metrics for HTTP requests, rate-limit reasons,
+upstream latency/errors, stream duration, time-to-first-token, and reported or estimated
+token usage. Restrict scraping at the reverse proxy if metrics should not be public. Labels
+never contain request IDs, IP addresses, or chat content. Every response includes an
+`X-Request-ID` header, also included in access and application logs, so errors can be
+correlated without changing the plain-text chat error bodies.
+
+The runtime image is distroless; use an orchestrator HTTP probe for `/healthz` and
+`/readyz` rather than an in-container shell or curl health check.
+
 ## Docker
 
 The image builds only the Go binary because the generated frontend assets are committed,

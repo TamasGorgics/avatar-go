@@ -68,9 +68,11 @@ func run(cfg config.Config, logger *slog.Logger) error {
 		PerIPConcurrent:  cfg.PerIPConcurrent,
 		GlobalConcurrent: cfg.GlobalConcurrent,
 	})
-	handler := web.New(cfg, limiter, chat, logger).Handler()
+	webServer := web.New(cfg, limiter, chat, logger)
+	handler := webServer.Handler()
 
 	srv := newHTTPServer(cfg, handler, logger)
+	srv.RegisterOnShutdown(func() { webServer.SetReady(false) })
 
 	ln, err := net.Listen("tcp", cfg.Addr)
 	if err != nil {
