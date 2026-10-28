@@ -43,3 +43,23 @@ make fmt
 `make verify-assets` regenerates all three files and fails if the committed output is stale.
 `npm run test:js` runs the TypeScript stream tests. `make check` still runs vet, tests, and
 a build; use `make race` when touching concurrency.
+
+## Docker
+
+The image builds only the Go binary because the generated frontend assets are committed,
+so Node is not required:
+
+```sh
+make docker
+docker run --rm -p 8080:8080 --env-file .env avatar-go
+```
+
+Or use Compose:
+
+```sh
+docker compose up --build
+```
+
+`.env` is excluded from the build context and never baked into the image; configuration is
+read from environment variables at runtime. The runtime image is distroless and runs as a
+non-root user.

@@ -1,9 +1,10 @@
 GO ?= go
 NPM ?= npm
 BINARY ?= avatar
+IMAGE ?= avatar-go
 TEMPL ?= $(GO) tool templ
 
-.PHONY: all build run generate css assets verify-assets test test-js race vet fmt check clean
+.PHONY: all build run generate css assets verify-assets test test-js race vet fmt check clean docker
 
 all: build
 
@@ -49,6 +50,9 @@ fmt:
 	$(TEMPL) fmt ./internal/web
 
 check: vet test build
+
+docker:
+	docker build -t $(IMAGE) .
 
 clean:
 	rm -f $(BINARY)

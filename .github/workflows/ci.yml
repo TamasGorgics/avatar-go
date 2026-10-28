@@ -61,6 +61,9 @@ jobs:
       - name: Build
         run: go build -o /dev/null .
 
+      - name: Build Docker image
+        run: docker build -t avatar-go:ci .
+
       - name: Generate coverage badge
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |

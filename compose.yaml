@@ -1,0 +1,17 @@
+services:
+  avatar-go:
+    build: .
+    image: avatar-go:local
+    ports:
+      - "8080:8080"
+    env_file:
+      - .env
+    environment:
+      ADDR: ":8080"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 15s
+    restart: unless-stopped

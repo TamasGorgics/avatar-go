@@ -1,0 +1,10 @@
+.git
+.github
+.env
+.env.*
+node_modules
+avatar
+coverage.out
+badge
+.DS_Store
+*.log

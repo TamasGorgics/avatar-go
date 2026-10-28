@@ -22,6 +22,8 @@ to `main` and pull requests; there is no other CI.
   - `page_templ.go`, `assets/app.css`, and `assets/app.js` must not be edited by hand.
   - The page uses no UI framework because `/chat` returns a plain-text stream; htmx and
     Alpine are intentionally absent. TypeScript is bundled with esbuild.
+- `Dockerfile`, `.dockerignore`, and `compose.yaml` — multi-stage image and local Compose
+  service. The image build only needs Go because generated frontend assets are committed.
 
 `web.Limiter` and `twin.Chatter` exist so the HTTP layer can be tested with fakes; keep
 those seams. `ratelimit.NewWithClock` supports time-dependent tests without sleeping.
@@ -41,6 +43,8 @@ those seams. `ratelimit.NewWithClock` supports time-dependent tests without slee
   the committed files differ. CI runs this.
 - `make fmt` runs `go fmt ./...` and `go tool templ fmt ./internal/web`; `make clean`
   removes the built binary.
+- Docker: `make docker` builds the `avatar-go` image (override with `IMAGE=...`); run it
+  with `--env-file .env`, or use `docker compose up --build`.
 - Requires Go 1.27.1 per `go.mod`; SDK v3 itself needs Go 1.26+. Frontend tooling needs
   Node 22.12+ and npm, but normal `go build`/`go test` use the committed generated files.
 - SDK import path is versioned: `github.com/openai/openai-go/v3` (not `.../openai-go`).
@@ -65,7 +69,7 @@ with `make test-js`.
 version from `go.mod`, installs Node dependencies with `npm ci`, regenerates Templ,
 Tailwind, and JavaScript output with `make verify-assets`, runs `npm run test:js`, then
 checks formatting, runs `go vet ./...`, `go test ./...` with a coverage profile,
-`go test -race ./...`, and `go build -o /dev/null .`.
+`go test -race ./...`, `go build -o /dev/null .`, and a Docker image build.
 
 On pushes to `main`, CI also writes the total coverage to a shields.io endpoint JSON and
 publishes it to the dedicated `badges` branch. The README coverage badge reads
