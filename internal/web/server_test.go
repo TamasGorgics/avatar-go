@@ -70,10 +70,17 @@ func TestPage(t *testing.T) {
 		`id="chat-form"`,
 		`id="chat-input"`,
 		`data-prompt="What have you built with Go?"`,
+		`href="https://www.linkedin.com/in/tamasgorgics/"`,
+		`target="_blank"`,
+		`rel="noopener noreferrer"`,
+		`aria-label="Tamas Gorgics on LinkedIn"`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("page body missing %q", want)
 		}
+	}
+	if strings.Contains(body, "Built with Go, Templ, and Tailwind CSS.") {
+		t.Error("page body still contains the old footer credit")
 	}
 	if strings.Contains(body, "<style") {
 		t.Error("page body contains an inline style block")
