@@ -115,6 +115,57 @@ func TestPageRenderFailure(t *testing.T) {
 	}
 }
 
+func TestSecurityHeaders(t *testing.T) {
+	srv := New(testConfig(), &fakeLimiter{allowed: true}, &fakeChatter{stream: &fakeStream{}}, discardLogger())
+
+	tests := []struct {
+		name   string
+		method string
+		path   string
+		body   string
+	}{
+		{name: "page", method: http.MethodGet, path: "/"},
+		{name: "asset", method: http.MethodGet, path: "/assets/app.css"},
+		{name: "chat", method: http.MethodPost, path: "/chat", body: validChatBody},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var body *strings.Reader
+			if tc.body != "" {
+				body = strings.NewReader(tc.body)
+			} else {
+				body = strings.NewReader("")
+			}
+			req := httptest.NewRequest(tc.method, tc.path, body)
+			if tc.path == "/chat" {
+				req.Header.Set("Content-Type", "application/json")
+			}
+			rec := httptest.NewRecorder()
+			srv.Handler().ServeHTTP(rec, req)
+
+			if got := rec.Header().Get("X-Content-Type-Options"); got != "nosniff" {
+				t.Errorf("X-Content-Type-Options = %q", got)
+			}
+			if got := rec.Header().Get("X-Frame-Options"); got != "DENY" {
+				t.Errorf("X-Frame-Options = %q", got)
+			}
+			if got := rec.Header().Get("Referrer-Policy"); got != "strict-origin-when-cross-origin" {
+				t.Errorf("Referrer-Policy = %q", got)
+			}
+			if got := rec.Header().Get("Permissions-Policy"); got != "camera=(), microphone=(), geolocation=()" {
+				t.Errorf("Permissions-Policy = %q", got)
+			}
+			csp := rec.Header().Get("Content-Security-Policy")
+			for _, want := range []string{"default-src 'self'", "frame-ancestors 'none'", "script-src 'self' 'unsafe-inline'"} {
+				if !strings.Contains(csp, want) {
+					t.Errorf("Content-Security-Policy missing %q: %q", want, csp)
+				}
+			}
+		})
+	}
+}
+
 func TestAssets(t *testing.T) {
 	srv := New(testConfig(), &fakeLimiter{allowed: true}, &fakeChatter{stream: &fakeStream{}}, discardLogger())
 

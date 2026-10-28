@@ -20,7 +20,14 @@ import (
 	"avatar-go/internal/web"
 )
 
-const shutdownTimeout = 10 * time.Second
+const (
+	shutdownTimeout   = 10 * time.Second
+	readHeaderTimeout = 10 * time.Second
+	readTimeout       = 15 * time.Second
+	writeTimeout      = 75 * time.Second
+	idleTimeout       = 120 * time.Second
+	maxHeaderBytes    = 32 << 10
+)
 
 //go:embed about.md
 var about string
@@ -52,14 +59,17 @@ func run(cfg config.Config, logger *slog.Logger) error {
 		BaseURL: cfg.LLMBaseURL,
 		Model:   cfg.Model,
 	})
-	handler := web.New(cfg, ratelimit.New(), chat, logger).Handler()
+	limiter := ratelimit.New(ratelimit.Limits{
+		PerIPMinute:      cfg.PerIPMinute,
+		PerIPHourly:      cfg.PerIPHourly,
+		GlobalMinute:     cfg.GlobalMinute,
+		GlobalDaily:      cfg.DailyCap,
+		PerIPConcurrent:  cfg.PerIPConcurrent,
+		GlobalConcurrent: cfg.GlobalConcurrent,
+	})
+	handler := web.New(cfg, limiter, chat, logger).Handler()
 
-	srv := &http.Server{
-		Addr:              cfg.Addr,
-		Handler:           handler,
-		ReadHeaderTimeout: 10 * time.Second,
-		ErrorLog:          slog.NewLogLogger(logger.Handler(), slog.LevelError),
-	}
+	srv := newHTTPServer(cfg, handler, logger)
 
 	ln, err := net.Listen("tcp", cfg.Addr)
 	if err != nil {
@@ -78,6 +88,19 @@ func run(cfg config.Config, logger *slog.Logger) error {
 		return fmt.Errorf("serve: %w", err)
 	}
 	return nil
+}
+
+func newHTTPServer(cfg config.Config, handler http.Handler, logger *slog.Logger) *http.Server {
+	return &http.Server{
+		Addr:              cfg.Addr,
+		Handler:           handler,
+		ReadHeaderTimeout: readHeaderTimeout,
+		ReadTimeout:       readTimeout,
+		WriteTimeout:      writeTimeout,
+		IdleTimeout:       idleTimeout,
+		MaxHeaderBytes:    maxHeaderBytes,
+		ErrorLog:          slog.NewLogLogger(logger.Handler(), slog.LevelError),
+	}
 }
 
 // serve runs srv on ln until ctx is canceled, then drains in-flight requests.

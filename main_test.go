@@ -17,10 +17,42 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"avatar-go/internal/config"
 )
 
 func testLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
+}
+
+func TestNewHTTPServerTimeouts(t *testing.T) {
+	cfg := config.Config{Addr: ":1234"}
+	srv := newHTTPServer(cfg, http.NewServeMux(), testLogger())
+
+	if srv.Addr != cfg.Addr {
+		t.Errorf("Addr = %q, want %q", srv.Addr, cfg.Addr)
+	}
+	if srv.ReadHeaderTimeout != readHeaderTimeout {
+		t.Errorf("ReadHeaderTimeout = %s, want %s", srv.ReadHeaderTimeout, readHeaderTimeout)
+	}
+	if srv.ReadTimeout != readTimeout {
+		t.Errorf("ReadTimeout = %s, want %s", srv.ReadTimeout, readTimeout)
+	}
+	if srv.WriteTimeout != writeTimeout {
+		t.Errorf("WriteTimeout = %s, want %s", srv.WriteTimeout, writeTimeout)
+	}
+	if srv.IdleTimeout != idleTimeout {
+		t.Errorf("IdleTimeout = %s, want %s", srv.IdleTimeout, idleTimeout)
+	}
+	if srv.MaxHeaderBytes != maxHeaderBytes {
+		t.Errorf("MaxHeaderBytes = %d, want %d", srv.MaxHeaderBytes, maxHeaderBytes)
+	}
+	if srv.ErrorLog == nil {
+		t.Error("ErrorLog is nil")
+	}
+	if srv.WriteTimeout <= 60*time.Second {
+		t.Errorf("WriteTimeout = %s, want more than the 60s stream timeout", srv.WriteTimeout)
+	}
 }
 
 func envWithout(keys ...string) []string {

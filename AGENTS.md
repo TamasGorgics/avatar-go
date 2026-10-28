@@ -12,9 +12,11 @@ to `main` and pull requests; there is no other CI.
   about.md` profile.
 - `internal/config` — env loading (`Load`) and optional `.env` parsing (`LoadDotEnv`).
 - `internal/logging` — `slog` setup: colored text for local terminals, JSON elsewhere.
-- `internal/ratelimit` — in-memory per-IP/hour and global daily limiter.
+- `internal/ratelimit` — in-memory minute/hour/day request limits plus active-stream
+  caps, with IPv6 `/64` grouping and idle-state pruning.
 - `internal/twin` — system prompt, SDK client, and `Chatter`/`Stream` interfaces.
-- `internal/web` — routes, chat handler/sanitization, access logs, and the Templ page.
+- `internal/web` — routes, chat handler/sanitization, prompt-injection screening,
+  security headers, access logs, and the Templ page.
   - `page.templ` is the page source; `page_templ.go` is generated and committed.
   - `assets/src/app.css` is the Tailwind source; `assets/src/js/*.ts` is the TypeScript
     source. `assets/app.css` and `assets/app.js` are generated, committed, and embedded
@@ -60,12 +62,17 @@ Tests sit beside the code; shared web fakes are in `internal/web/helpers_test.go
 `internal/twin` tests the SDK against an `httptest` SSE server, so no API key or network is
 needed. `internal/logging` tests JSON/text formats, levels, color, and grouped attrs;
 `internal/web` checks the access-log fields and severity, page rendering, embedded assets,
-the single theme bootstrap inline script, and the absence of inline CSS. `internal/config`
-tests both environment parsing and `.env` syntax; the `main` subprocess test proves `.env`
-is loaded at startup by running from a temporary directory.
+security headers, the single theme bootstrap inline script, and the absence of inline CSS.
+Its chat tests cover JSON/origin enforcement, body overflow, UTF-8-safe truncation,
+injection rejection, X-Forwarded-For handling, and limiter release.
+`internal/ratelimit` tests each window, concurrency caps, idempotent release, IPv6 `/64`
+keys, and idle pruning against an injected clock. `internal/config` tests both environment
+parsing and `.env` syntax; the `main` subprocess test proves `.env` is loaded at startup by
+running from a temporary directory.
 `internal/web/assets/src/js/stream.test.ts` uses Vitest and an injected clock to cover
 stream pacing, drain, cancellation, and reduced motion; `theme.test.ts` covers stored and
-system theme resolution. Run both with `make test-js`.
+system theme resolution; `chat.test.ts` covers history trimming. Run all with
+`make test-js`.
 
 ## CI
 
@@ -106,17 +113,21 @@ Config is then read once by `config.Load`:
 | `OPENAI_API_KEY` / `LLM_API_KEY` | — | Either works; first non-empty wins |
 | `LLM_BASE_URL` | `https://api.openai.com/v1` | Must include `/v1`; `/chat/completions` is appended, so no trailing slash |
 | `LLM_MODEL` | `gpt-4o-mini` | Any OpenAI-compatible model |
-| `DAILY_CAP` | `300` | Global requests per calendar day |
+| `PER_IP_MINUTE` | `3` | Requests per client IP per rolling minute |
 | `PER_IP_HOURLY` | `20` | Requests per client IP per rolling hour |
-| `TRUST_PROXY` | unset | Set to `1` only behind a trusted proxy (e.g. Caddy); enables `X-Forwarded-For` |
+| `GLOBAL_MINUTE` | `20` | Requests across all clients per rolling minute |
+| `DAILY_CAP` | `300` | Requests across all clients per calendar day |
+| `PER_IP_CONCURRENT` | `1` | Active chat streams per client IP |
+| `GLOBAL_CONCURRENT` | `4` | Active chat streams across all clients |
+| `TRUST_PROXY` | unset | Set to `1` only behind one trusted proxy (e.g. Caddy); enables rightmost `X-Forwarded-For` |
 | `LOG_FORMAT` | `auto` | `auto` = colored text on a terminal, JSON otherwise; `text`/`json` force a format |
 | `LOG_LEVEL` | `info` | `debug`, `info`, `warn`, or `error` |
 
 The client is built with explicit `option.WithAPIKey`/`option.WithBaseURL`, so the SDK's
 own defaults do not apply: `OPENAI_BASE_URL` is ignored — use `LLM_BASE_URL`. Missing API
-key is not validated at startup; requests fail with `502` and the error is logged. Invalid
-integer caps fall back to their defaults; an invalid `LOG_FORMAT` falls back to `auto` and
-an invalid `LOG_LEVEL` to `info`.
+key is not validated at startup; requests fail with `502` and the error is logged. A zero
+cap denies that dimension; invalid or negative integer caps fall back to their defaults.
+An invalid `LOG_FORMAT` falls back to `auto` and an invalid `LOG_LEVEL` to `info`.
 
 ## Logging
 
@@ -126,9 +137,11 @@ logfmt-style metadata. Anything else (containers, systemd, pipes, CI) gets
 newline-delimited JSON. `NO_COLOR` or `TERM=dumb` disables color without changing formats.
 
 Every HTTP request logs `method`, `path`, `status`, `bytes`, `duration`, and `remote_ip`;
-4xx responses log at `WARN` and 5xx at `ERROR`. Rate-limit hits, upstream failures, stream
-errors, page-render errors, and shutdown problems include an `err` attribute. API keys are
-never logged. `http.Server.ErrorLog` is routed through the same logger.
+4xx responses log at `WARN` and 5xx at `ERROR`. Rate-limit hits log `ip` and `reason`;
+injection rejections log `ip` and the rule reason, never the message content. Upstream
+failures, stream errors, page-render errors, and shutdown problems include an `err`
+attribute. API keys are never logged. `http.Server.ErrorLog` is routed through the same
+logger.
 
 ## SDK notes
 
@@ -146,14 +159,30 @@ never logged. `http.Server.ErrorLog` is routed through the same logger.
 - Routes: `GET /` (Templ page), `GET /assets/` (embedded CSS/JS), and `POST /chat` with
   body `{"history":[{"role":"user"|"assistant","content":"..."}]}`. The chat response is a
   plain-text stream of assistant deltas, not SSE.
-- `/chat` sanitizes input deliberately: last 6 messages only, non-user/assistant roles
-  dropped (clients cannot inject `system`), each message truncated to 500 bytes, body
-  capped at 16 KB. Keep these guards when refactoring.
+- `/chat` sanitizes input deliberately: it keeps the last 6 submitted messages, drops
+  non-user/assistant roles (clients cannot inject `system`), cleans invisible
+  control/format characters, truncates each message to 500 bytes on a UTF-8 boundary,
+  caps the body at 16 KB with `413` on overflow, and requires the final message to be a
+  non-empty user message. Keep these guards when refactoring.
+- `/chat` requires `application/json` and rejects browser requests whose `Origin` (or
+  `Sec-Fetch-Site`) is cross-site. Non-browser clients can forge both headers, so these
+  checks are CSRF hardening, not authentication.
+- Visitor messages are screened for high-confidence prompt-injection phrases in
+  `internal/web/guard.go`, including spaced, fullwidth, and zero-width variants and
+  phrases split across messages. This is best-effort; the real limits are no tools,
+  public-profile-only context, a hardened prompt, and a 400-token completion cap.
+  Assistant messages are not screened because they are model output.
 - Rate limits are checked before JSON parsing, so malformed requests still consume quota.
-- Limiter state is in-memory: the daily counter resets on restart and is per-process, so it
-  is a spend guard, not a hard quota across replicas/redeploys.
-- `main.go` handles SIGINT/SIGTERM with `http.Server.Shutdown` and a 10s drain, so in-flight
-  streams can finish. Do not replace it with a bare `http.ListenAndServe`/`log.Fatal`.
+  Limiter state is in-memory: counters reset on restart and are per-process, so this is a
+  spend guard, not a hard quota across replicas/redeploys.
+- Security headers (CSP, `X-Frame-Options: DENY`, `nosniff`, referrer and permissions
+  policies) are applied to every response. The CSP allows `'unsafe-inline'` scripts only
+  because of the single inline theme bootstrap; adding scripts should otherwise use
+  external files. Chat responses are `no-store`.
+- `main.go` sets read, write, idle, and header limits on `http.Server` (the 75s write
+  timeout intentionally exceeds the 60s chat context) and handles SIGINT/SIGTERM with
+  `http.Server.Shutdown` and a 10s drain, so in-flight streams can finish. Do not replace
+  it with a bare `http.ListenAndServe`/`log.Fatal`.
 - `max_completion_tokens` is intentional (newer OpenAI models reject `max_tokens`).
 - The page follows the OS light/dark preference until the header switch stores an explicit
   `light` or `dark` choice in `localStorage`. The tiny inline bootstrap in `page.templ` is

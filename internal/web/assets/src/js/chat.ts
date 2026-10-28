@@ -16,6 +16,12 @@ export interface ChatController {
   readonly busy: boolean;
 }
 
+export const MAX_HISTORY = 6;
+
+export function recentHistory(history: ChatMessage[]): ChatMessage[] {
+  return history.slice(-MAX_HISTORY);
+}
+
 export function createChat(elements: ChatElements, reducedMotion: boolean): ChatController {
   const history: ChatMessage[] = [];
   let busy = false;
@@ -44,7 +50,7 @@ export function createChat(elements: ChatElements, reducedMotion: boolean): Chat
     let stream: TextStream | null = null;
 
     try {
-      const request: ChatRequest = { history };
+      const request: ChatRequest = { history: recentHistory(history) };
       const response = await fetch("/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },

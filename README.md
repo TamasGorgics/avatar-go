@@ -51,6 +51,42 @@ The page follows the OS light/dark preference on first visit. The header switch 
 explicit choice in `localStorage`, updates the browser theme color, and is applied before
 first paint by a small bootstrap script in the page head.
 
+## Security and limits
+
+`POST /chat` is rate-limited per client IP and globally, with active-stream caps so a slow
+request cannot tie up the model indefinitely:
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `PER_IP_MINUTE` | `3` | Requests per client IP per rolling minute |
+| `PER_IP_HOURLY` | `20` | Requests per client IP per rolling hour |
+| `GLOBAL_MINUTE` | `20` | Requests across all clients per rolling minute |
+| `DAILY_CAP` | `300` | Requests across all clients per calendar day |
+| `PER_IP_CONCURRENT` | `1` | Active chat streams per client IP |
+| `GLOBAL_CONCURRENT` | `4` | Active chat streams across all clients |
+
+A zero value denies that dimension; invalid or negative values fall back to the default.
+IPv6 clients are grouped by `/64` so rotating addresses within one allocation does not
+bypass the per-IP limits. State is in-memory and per-process, so limits reset on restart
+and are not shared across replicas.
+
+`TRUST_PROXY=1` must only be used behind one trusted reverse proxy that overwrites or
+appends `X-Forwarded-For`; the server uses the rightmost entry and falls back to the
+connection address if it is not a valid IP. The proxy should also preserve the original
+`Host`, because `/chat` checks the browser `Origin` against it.
+
+`/chat` also requires `application/json`, rejects cross-origin browser requests, caps the
+body at 16 KB, keeps the last six messages, truncates each message to 500 bytes on a valid
+UTF-8 boundary, and removes invisible control characters. Visitor messages are screened
+for common prompt-injection phrases before they reach the model. That screening is
+best-effort: the durable protections are that the model has no tools, sees only the public
+profile, has a hardened system prompt, and is capped at 400 completion tokens. Responses
+include a Content Security Policy and the usual framing/MIME/referrer headers; the one
+inline theme bootstrap is why the CSP allows `'unsafe-inline'` scripts.
+
+There is no CAPTCHA or WAF in the default deployment. If the public site attracts
+distributed bot traffic, put it behind Cloudflare or add Turnstile.
+
 ## Docker
 
 The image builds only the Go binary because the generated frontend assets are committed,

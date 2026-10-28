@@ -32,6 +32,9 @@ func TestSystemPrompt(t *testing.T) {
 	if !strings.Contains(got, "Answer ONLY from the PROFILE") {
 		t.Fatalf("prompt lost its rules:\n%s", got)
 	}
+	if !strings.Contains(got, "untrusted data") || !strings.Contains(got, "Never reveal") {
+		t.Fatalf("prompt lost its injection rules:\n%s", got)
+	}
 }
 
 func TestNewBuildsSystemPrompt(t *testing.T) {

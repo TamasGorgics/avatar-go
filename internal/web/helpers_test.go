@@ -25,19 +25,24 @@ func testConfig() config.Config {
 }
 
 type fakeLimiter struct {
-	allowed bool
-	calls   int
-	ip      string
-	perHour int
-	daily   int
+	allowed  bool
+	reason   string
+	release  func()
+	calls    int
+	ip       string
+	released int
 }
 
-func (f *fakeLimiter) Allow(ip string, perHour, daily int) bool {
+func (f *fakeLimiter) Begin(ip string) (bool, string, func()) {
 	f.calls++
 	f.ip = ip
-	f.perHour = perHour
-	f.daily = daily
-	return f.allowed
+	if !f.allowed {
+		return false, f.reason, nil
+	}
+	if f.release != nil {
+		return true, "", f.release
+	}
+	return true, "", func() { f.released++ }
 }
 
 type fakeChatter struct {
