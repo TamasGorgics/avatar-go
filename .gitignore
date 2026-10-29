@@ -29,6 +29,12 @@ node_modules/
 go.work
 go.work.sum
 
+# Playwright artifacts
+/.e2e/
+/test-results/
+/playwright-report/
+/blob-report/
+
 # env file
 .env
 

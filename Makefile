@@ -4,7 +4,7 @@ BINARY ?= avatar
 IMAGE ?= avatar-go
 TEMPL ?= $(GO) tool templ
 
-.PHONY: all build run generate css assets verify-assets test test-js race vet fmt check clean docker
+.PHONY: all build run generate css assets verify-assets test test-js race e2e eval vet fmt check clean docker
 
 all: build
 
@@ -38,6 +38,12 @@ test:
 
 test-js:
 	$(NPM) run test:js
+
+e2e:
+	$(NPM) run test:e2e
+
+eval:
+	$(GO) run ./cmd/eval
 
 race:
 	$(GO) test -race ./...

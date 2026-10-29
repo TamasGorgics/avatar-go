@@ -10,12 +10,16 @@
     "css": "tailwindcss -i ./internal/web/assets/src/app.css -o ./internal/web/assets/app.css --minify",
     "css:watch": "tailwindcss -i ./internal/web/assets/src/app.css -o ./internal/web/assets/app.css --watch",
     "check:js": "tsc -p tsconfig.json && tsc -p tsconfig.test.json",
+    "check:e2e": "tsc -p tsconfig.e2e.json",
     "build:js": "esbuild internal/web/assets/src/js/main.ts --bundle --format=iife --platform=browser --target=es2022 --minify --outfile=internal/web/assets/app.js",
     "watch:js": "esbuild internal/web/assets/src/js/main.ts --bundle --format=iife --platform=browser --target=es2022 --watch --outfile=internal/web/assets/app.js",
     "test:js": "vitest run",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
     "assets": "npm run check:js && npm run css && npm run build:js"
   },
   "devDependencies": {
+    "@playwright/test": "1.64.1",
     "@tailwindcss/cli": "4.3.3",
     "@types/node": "22.20.5",
     "esbuild": "0.28.2",

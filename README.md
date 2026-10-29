@@ -7,7 +7,8 @@ A small Go service that serves a chat page and streams answers from an OpenAI-co
 
 ## Development
 
-Requires Go 1.27.1+ and Node 22.12+ (Node is only needed for frontend asset changes and JavaScript tests).
+Requires Go 1.27.1+ and Node 22.12+ (Node is only needed for frontend asset changes,
+JavaScript tests, and browser E2E).
 
 ```sh
 cp .env.example .env
@@ -51,6 +52,49 @@ storage, and failure handling. `make check` still runs vet, tests, and a build; 
 The page follows the OS light/dark preference on first visit. The header switch stores an
 explicit choice in `localStorage`, updates the browser theme color, and is applied before
 first paint by a small bootstrap script in the page head.
+
+## Testing
+
+`make test` runs the Go tests, `make race` adds the race detector, and `make test-js` runs
+the Vitest suites for streaming, theme, request history, session storage, and failure
+handling.
+
+Browser tests use Playwright against the real server and a local fake OpenAI-compatible
+upstream, so they need no API key or network. Install Chromium once, then run the suite:
+
+```sh
+npm ci
+npx playwright install chromium
+make e2e
+```
+
+The Playwright specs cover a successful stream and reload restore, `429` with a retry
+countdown, `400` editing, upstream failure, Stop with a partial answer, theme persistence,
+and a mobile viewport. `npm run check:e2e` type-checks the specs. CI runs them in a separate
+job; `make check` stays focused on vet, Go tests, and a build.
+
+## Prompt evals
+
+`cmd/eval` checks prompt behavior against the same `about.md` and model settings as the
+server. The corpus in `internal/eval/testdata/cases.json` covers refusals, prompt-injection
+attempts, off-topic requests, and profile facts marked `requires_profile`. Factual cases
+only run once `about.md` is no longer `TODO`; `-strict-profile` makes that placeholder an
+error instead of skipping them.
+
+```sh
+go run ./cmd/eval -dry-run   # validate the corpus and list cases
+go run ./cmd/eval            # real model calls; needs an API key
+go run ./cmd/eval -v         # print every answer
+```
+
+`make eval` is shorthand for a real run. Evals are not part of normal CI because they cost
+money. The manual **Prompt eval** workflow can run a dry run or the full suite; enable its
+commented nightly schedule after the profile lands. Add specific profile facts to the
+corpus as `about.md` grows.
+
+The injection screen has a separate no-model regression corpus in
+`internal/web/testdata/screening.json`, with both attacks and benign questions that must
+not be rejected. When a false positive is reported, add it there before tuning the rules.
 
 ## Chat behavior
 

@@ -3,13 +3,18 @@
 Small Go service (`main` at repo root) that serves a chat page and streams answers from an
 OpenAI-compatible API via `github.com/openai/openai-go/v3`. The page is built with Templ
 and Tailwind CSS. A small `Makefile` wraps the common build, test, and run commands.
-GitHub Actions runs formatting, generated-asset checks, vet, tests, and a build on pushes
-to `main` and pull requests; there is no other CI.
+GitHub Actions runs formatting, generated-asset checks, vet, Go and JavaScript tests, a
+build, and browser E2E on pushes to `main` and pull requests. A separate manual prompt-eval
+workflow makes real model calls and is not part of normal CI.
 
 ## Layout
 
 - `main.go` — wiring, HTTP server lifecycle (graceful shutdown), and the `//go:embed
   about.md` profile.
+- `cmd/eval` — prompt-eval CLI. It loads the same config and profile as the server, skips
+  profile-dependent cases while `about.md` is `TODO`, and exits non-zero on a failed case.
+- `internal/eval` — eval corpus loading/validation, profile readiness, answer grading, and
+  stream collection. It has no model or SDK dependency.
 - `internal/config` — env loading (`Load`) and optional `.env` parsing (`LoadDotEnv`).
 - `internal/logging` — `slog` setup: colored text for local terminals, JSON elsewhere.
 - `internal/ratelimit` — in-memory minute/hour/day request limits plus active-stream
@@ -31,6 +36,10 @@ to `main` and pull requests; there is no other CI.
     are the source of truth; failed attempts never enter model history. `chat-history.ts`,
     `chat-storage.ts`, and `failure.ts` hold the pure history, session, and error logic so
     they can be tested without a DOM.
+  - `testdata/screening.json` is the no-model injection-screen corpus. It contains attacks
+    and benign questions that must not be rejected, so rules can be tuned without guessing.
+- `e2e/` — Playwright specs plus a deterministic fake OpenAI-compatible server and app
+  launcher. `playwright.config.ts` starts both; `tsconfig.e2e.json` type-checks the specs.
 - `Dockerfile`, `.dockerignore`, and `compose.yaml` — multi-stage image and local Compose
   service. The image build only needs Go because generated frontend assets are committed.
 
@@ -44,7 +53,13 @@ those seams. `ratelimit.NewWithClock` supports time-dependent tests without slee
 - Build: `make build` (writes `./avatar`; override with `make BINARY=other build`)
 - Test: `make test`; `make race` when touching concurrency; `make test-js` for the
   TypeScript stream and theme tests.
-- Check: `make check` runs vet, tests, and a build.
+- Browser tests: `npm ci` and `npx playwright install chromium` once, then `make e2e`;
+  `npm run check:e2e` type-checks the specs. E2E uses a local fake upstream and needs no
+  API key or network.
+- Prompt evals: `make eval` or `go run ./cmd/eval` makes real model calls. Use
+  `go run ./cmd/eval -dry-run` to validate the corpus without calling the model,
+  `-strict-profile` to fail while `about.md` is still `TODO`, and `-v` to print answers.
+- Check: `make check` runs vet, tests, and a build; it does not run E2E or model evals.
 - Focused test: `go test ./internal/web -run TestChatSuccess`
 - Frontend setup: `npm ci` once, then `make assets` after editing `.templ`, CSS, or
   TypeScript files. `make generate` runs Templ only; `make css` runs Tailwind only.
@@ -75,15 +90,20 @@ tests attempt versus model-call windows, daily token reservation and settlement,
 caps, idempotent release, IPv6 `/64` keys, and idle pruning against an injected clock.
 `internal/config` tests both environment
 parsing and `.env` syntax; the `main` subprocess test proves `.env` is loaded at startup by
-running from a temporary directory.
+running from a temporary directory. `internal/eval` tests corpus validation, profile gating,
+whole-word grading, and stream collection with fakes. `internal/web/screening_test.go` runs
+both attack and benign cases from `testdata/screening.json`, so screening changes do not
+silently reject legitimate questions. `e2e/` exercises the real page in Chromium against a
+deterministic fake upstream: successful streaming and reload restore, `429` countdown, `400`
+editing, `502` retry, Stop, theme persistence, and mobile layout.
 `internal/web/assets/src/js/stream.test.ts` uses Vitest and an injected clock to cover
 stream pacing, drain, cancellation, and reduced motion; `theme.test.ts` covers stored and
 system theme resolution; `chat-history.test.ts` covers last-six request history and
 stopped/empty answers; `chat-storage.test.ts` covers the versioned session schema, size
 caps, and corrupt data; `failure.test.ts` covers `Retry-After` parsing, failure
-classification, and countdown formatting. Run all with `make test-js`. The controller's
-DOM behavior is manually QA'd until Playwright lands; do not add a DOM emulation
-dependency for this layer without revisiting that decision.
+classification, and countdown formatting. Run all with `make test-js`. The controller's DOM
+behavior is covered by the Playwright E2E specs; keep the Vitest layer DOM-free unless that
+decision is revisited.
 
 ## CI
 
@@ -91,11 +111,18 @@ dependency for this layer without revisiting that decision.
 version from `go.mod`, installs Node dependencies with `npm ci`, regenerates Templ,
 Tailwind, and JavaScript output with `make verify-assets`, runs `npm run test:js`, then
 checks formatting, runs `go vet ./...`, `go test ./...` with a coverage profile,
-`go test -race ./...`, `go build -o /dev/null .`, and a Docker image build.
+`go test -race ./...`, `go build -o /dev/null .`, and a Docker image build. A separate
+`e2e` job type-checks the Playwright specs, installs Chromium, and runs the browser suite
+against the fake upstream.
 
 On pushes to `main`, CI also writes the total coverage to a shields.io endpoint JSON and
 publishes it to the dedicated `badges` branch. The README coverage badge reads
 `badges/coverage.json`; do not use that branch for anything else.
+
+Prompt evals run only from `.github/workflows/prompt-eval.yml`, manually or on an opt-in
+nightly schedule. The workflow uses `-strict-profile`, so it fails until `about.md` is
+populated rather than spending tokens on placeholder content. Keep real model calls out of
+`ci.yml`.
 
 ## The profile is embedded at compile time
 
@@ -104,7 +131,8 @@ publishes it to the dedicated `badges` branch. The README coverage badge reads
 `internal/twin`; if you move the embed, move the file with it. Editing `about.md` does
 nothing until the binary is rebuilt/restarted. It is currently the literal text `TODO`, so
 the twin knows nothing until it is filled in. The model is instructed to answer only from
-this file.
+this file. The eval CLI reads the same file directly; profile-dependent cases stay skipped
+until it is ready, and `-strict-profile` makes that state an error.
 
 ## Configuration
 
@@ -219,6 +247,14 @@ probe rather than an in-container shell.
   persisted. Clear aborts an in-flight answer and removes the stored transcript.
 - The first six messages sent to `/chat` come from `turnsToHistory`, with the pending
   question last. Keep the last-six rule when adding conversation controls.
+- Browser tests must keep using the deterministic fake upstream in `e2e/support/`; only the
+  prompt-eval CLI may make real model calls. The fake scenarios are keyed by the `e2e:*`
+  question prefix, so keep those questions out of the eval corpus.
+- The eval CLI calls `twin.Chatter` directly; it does not exercise the HTTP screen or
+  limiter. Injection cases there test prompt resilience, while
+  `internal/web/screening_test.go` covers the screen itself.
+- Prompt-eval factual cases stay marked `requires_profile` until `about.md` is populated.
+  Add specific facts to `internal/eval/testdata/cases.json` as the profile grows.
 - Security headers (CSP, `X-Frame-Options: DENY`, `nosniff`, referrer and permissions
   policies) are applied to every response. The CSP allows `'unsafe-inline'` scripts only
   because of the single inline theme bootstrap; adding scripts should otherwise use

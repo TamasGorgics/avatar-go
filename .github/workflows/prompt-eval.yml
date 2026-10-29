@@ -1,0 +1,43 @@
+name: Prompt eval
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Validate the corpus without calling the model
+        type: boolean
+        default: false
+  # Enable the nightly run once about.md is populated (P0.1).
+  # schedule:
+  #   - cron: "17 5 * * *"
+
+permissions:
+  contents: read
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run prompt evals
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_BASE_URL: ${{ vars.LLM_BASE_URL }}
+          LLM_MODEL: ${{ vars.LLM_MODEL }}
+        run: |
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            go run ./cmd/eval -dry-run
+          else
+            go run ./cmd/eval -strict-profile
+          fi

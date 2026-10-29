@@ -8,3 +8,11 @@ coverage.out
 badge
 .DS_Store
 *.log
+.e2e
+e2e
+playwright.config.ts
+tsconfig.e2e.json
+vitest.config.mts
+test-results
+playwright-report
+blob-report

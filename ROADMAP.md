@@ -37,8 +37,8 @@ the single biggest gap: without it the twin has nothing to answer from.
 ### 2. Fix the failed-question UX
 
 Landed: failed questions are recoverable, failures are classified, Stop/Copy/Regenerate/
-Clear/Edit last exist, and completed/stopped turns restore from `sessionStorage`. Browser
-level coverage is tracked under the E2E item below.
+Clear/Edit last exist, and completed/stopped turns restore from `sessionStorage`. Playwright
+covers the recovery, Stop, theme, and mobile flows at the browser level.
 
 - [x] Restore the question to the input, or add a Retry action that resends it.
 - [x] Distinguish `429`, `400`, `502`, and network failures in the UI.
@@ -76,16 +76,22 @@ time-to-first-token, which limit is firing, and how many tokens are being spent?
 
 ### 5. Add browser E2E tests and a prompt eval suite
 
-Unit tests are strong, but there is no real-browser coverage for streaming, error states,
-theme switching, or mobile layout. Prompt changes are also untested behavior changes.
+Landed: Playwright covers the real page against a deterministic fake upstream, and the
+prompt-eval CLI runs a curated corpus without touching normal CI. Profile-specific factual
+cases stay gated until `about.md` exists.
 
-- [ ] Add Playwright tests for a successful stream, `429`, `400`, upstream failure, Stop,
+- [x] Add Playwright tests for a successful stream, `429`, `400`, upstream failure, Stop,
       theme switching, and a mobile viewport.
-- [ ] Keep a prompt eval corpus of profile questions with expected facts and refusals.
-- [ ] Include injection attempts and, equally important, benign questions that must not be
-      rejected by the screening rules.
-- [ ] Run evals manually or nightly rather than on every CI run if cost is a concern.
-- [ ] Track false positives from the injection screen and tune the rules.
+- [x] Add the prompt-eval harness and a corpus of refusals, prompt-injection attempts,
+      off-topic requests, and profile questions. Factual cases are marked
+      `requires_profile` and activate when `about.md` is populated (P0.1).
+- [x] Include injection attempts and, equally important, benign questions that must not be
+      rejected by the screening rules in `internal/web/testdata/screening.json`.
+- [x] Run evals manually or nightly rather than on every CI run; the prompt-eval workflow is
+      manual now and has an opt-in nightly schedule for after P0.1.
+- [x] Track false positives from the injection screen and tune the rules; add reported
+      benign questions to the screening corpus before changing a rule.
+- [ ] Add specific profile facts to the eval corpus once `about.md` is populated.
 
 ---
 
